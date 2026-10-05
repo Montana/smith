@@ -208,7 +208,8 @@ set(exported_targets
     smith_mesh_utils
     smith_numerics
     smith_physics
-    smith_differentiable_numerics)
+    smith_differentiable_numerics
+    smith_pseudohessian_identifiability)
 
 add_library(smith INTERFACE)
 target_link_libraries(smith INTERFACE ${exported_targets})
