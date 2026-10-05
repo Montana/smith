@@ -299,18 +299,17 @@ TEST_P(BlockPreconditionerTest, BlockSolve)
     case BlockPrecondType::SchurFullCustom:
       linear_options.preconditioner = smith::Preconditioner::BlockSchur;
       linear_options.block_schur_type = smith::BlockSchurType::Full;
-      linear_options.schur_approx_type = smith::SchurApproxType::Custom;
       std::vector<double> jacobian_weights{0.0, 1.0, 0.0};
 
-      std::vector<smith::BlockProviderOverride> overrides;
-      overrides.push_back(smith::makeWeakFormBlockProviderOverride(1, T2_form, shape_disp, T2_arguments,
-                                                                   jacobian_weights, time_info, T2_bc_manager.get()));
+      auto schur_override = smith::makeWeakFormBlockProviderOverride(
+          1, T2_form, shape_disp, T2_arguments, jacobian_weights, time_info, T2_bc_manager.get());
+      smith::SchurOperator schur(std::move(schur_override.provider));
 
       auto solvers =
           smith::buildBlockPreconditionerSubSolvers(linear_options.sub_block_linear_solver_options, mesh->getComm());
 
       diff_precond = std::make_unique<smith::BlockSchurPreconditioner>(
-          std::move(solvers), linear_options.block_schur_type, linear_options.schur_approx_type, std::move(overrides));
+          std::move(solvers), linear_options.block_schur_type, std::move(schur));
       break;
   }
 
