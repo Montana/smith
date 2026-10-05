@@ -229,18 +229,14 @@ TEST_P(NonlinearMixedDiffusionPreconditionerTest, BlockSolve)
   const auto time_info = smith::TimeInfo(time.get(), dt.get(), cycle);
 
   if (preconditioner_case == PreconditionerCase::StateDependentCustomFullSchur) {
-    linear_options.schur_approx_type = smith::SchurApproxType::Custom;
     const std::vector<smith::LinearSolverOptions> sub_solver_options{flux_solver_options, schur_solver_options};
     auto sub_solvers = smith::buildBlockPreconditionerSubSolvers(sub_solver_options, mesh->getComm());
 
-    std::vector<smith::BlockProviderOverride> overrides;
-    overrides.push_back(smith::makeStateDependentWeakFormBlockProviderOverride(
-        1, temperature_schur_form, shape_disp, {temperature}, {1.0}, time_info, temp_bc_manager.get(),
-        {smith::StateBlockBinding{1, 0}}));
+    auto schur =
+        smith::weakFormSchur(temperature_schur_form, shape_disp, temperature, time_info, temp_bc_manager.get());
 
-    auto preconditioner =
-        std::make_unique<smith::BlockSchurPreconditioner>(std::move(sub_solvers), linear_options.block_schur_type,
-                                                          linear_options.schur_approx_type, std::move(overrides));
+    auto preconditioner = std::make_unique<smith::BlockSchurPreconditioner>(
+        std::move(sub_solvers), linear_options.block_schur_type, std::move(schur));
     nonlinear_solver = smith::buildNonlinearBlockSolver(nonlin_opts, linear_options, *mesh, std::move(preconditioner));
   }
 

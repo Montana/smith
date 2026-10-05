@@ -502,7 +502,7 @@ TEST(BlockTriangularPreconditionerCustom, UpperSweepUsesOverrideDiagonal)
   }
 }
 
-TEST(BlockSchurPreconditionerCustom, FullWithExactSchurOverrideIsExactInverse)
+TEST(BlockSchurPreconditionerCustom, FullWithExactSchurOperatorIsExactInverse)
 {
   Array<int> offsets({0, 2, 4});
 
@@ -571,12 +571,11 @@ TEST(BlockSchurPreconditionerCustom, FullWithExactSchurOverrideIsExactInverse)
   solvers.push_back(std::make_unique<Exact2x2Solver>());
   solvers.push_back(std::make_unique<Exact2x2Solver>());
 
-  std::vector<smith::BlockProviderOverride> overrides;
-  overrides.push_back(
-      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A))));
+  auto schur_override =
+      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
+  smith::SchurOperator schur(std::move(schur_override.provider));
 
-  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Full, smith::SchurApproxType::Custom,
-                                    std::move(overrides));
+  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Full, std::move(schur));
   P.SetOperator(A);
 
   Vector rhs(4), x(4), Ax(4);
@@ -685,12 +684,11 @@ TEST(BlockSchurPreconditionerCustom, CustomOverrideNotConsumedOnRepeatedSetOpera
   std::vector<OwnedHypreParMatrix> override_mats;
   override_mats.push_back(makeHypreScaledIdentity(n, 7.0));
 
-  std::vector<smith::BlockProviderOverride> overrides;
-  overrides.push_back(
-      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A))));
+  auto schur_override =
+      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
+  smith::SchurOperator schur(std::move(schur_override.provider));
 
-  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, smith::SchurApproxType::Custom,
-                                    std::move(overrides));
+  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 
   P.SetOperator(A);
   P.SetOperator(A);
@@ -725,16 +723,15 @@ TEST(BlockSchurPreconditionerCustom, StateDependentProviderUpdatesSchurSolve)
   solvers.push_back(std::make_unique<OperatorDiagonalSolver>());
 
   auto update_count = std::make_shared<int>(0);
-  std::vector<smith::BlockProviderOverride> overrides;
-  overrides.push_back(smith::makeStateDependentBlockProviderOverride(
+  auto schur_override = smith::makeStateDependentBlockProviderOverride(
       1, [update_count](const mfem::Vector& state, const mfem::Array<int>& block_offsets) {
         ++(*update_count);
         const int block_size = block_offsets[2] - block_offsets[1];
         return makeMutableLocalScaledIdentityOp(block_size, state[block_offsets[1]]);
-      }));
+      });
+  smith::SchurOperator schur(std::move(schur_override.provider));
 
-  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, smith::SchurApproxType::Custom,
-                                    std::move(overrides));
+  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 
   Vector state(2 * n);
   state = 0.0;

@@ -113,15 +113,14 @@ TEST(StateDependentPreconditioner, UpdatesProviderCurrentOperatorFromNonlinearSt
 
   auto provider = std::make_unique<StateScaledIdentityProvider>(u1->Size());
   auto* provider_ptr = provider.get();
-  std::vector<BlockProviderOverride> overrides;
-  overrides.emplace_back(1, std::move(provider));
+  SchurOperator schur(std::move(provider));
 
   std::vector<std::unique_ptr<mfem::Solver>> sub_solvers;
   sub_solvers.push_back(std::make_unique<IdentitySolver>());
   sub_solvers.push_back(std::make_unique<IdentitySolver>());
 
-  auto preconditioner = std::make_unique<BlockSchurPreconditioner>(std::move(sub_solvers), BlockSchurType::Diagonal,
-                                                                   SchurApproxType::Custom, std::move(overrides));
+  auto preconditioner = std::make_unique<BlockSchurPreconditioner>(
+      std::move(sub_solvers), BlockSchurType::Diagonal, std::move(schur));
 
   NonlinearSolverOptions nonlin_opts;
   nonlin_opts.nonlin_solver = NonlinearSolver::Newton;

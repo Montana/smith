@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -48,8 +49,7 @@ using StateDependentBlockOperatorBuilder =
  * @brief Optional provider override for a diagonal block operator.
  *
  * The block index i identifies the provider that supplies the operator used
- * in place of the Jacobian block A_ii. For 2x2 Schur systems, index 1 supplies
- * the custom Schur operator when approxType is SchurApproxType::Custom.
+ * in place of the Jacobian block A_ii.
  */
 struct BlockProviderOverride {
   /**
@@ -64,6 +64,26 @@ struct BlockProviderOverride {
 
   int block_index;                                  ///< Block index to override.
   std::unique_ptr<BlockOperatorProvider> provider;  ///< Provider supplying the override operator.
+};
+
+/**
+ * @brief Operator source used to approximate a Schur complement.
+ *
+ * This semantic wrapper lets Schur-preconditioner callers provide a custom
+ * operator without specifying the Schur block index or approximation enum.
+ */
+class SchurOperator {
+ public:
+  /**
+   * @brief Construct from an owned operator provider.
+   * @param provider Provider supplying the Schur operator.
+   */
+  explicit SchurOperator(std::unique_ptr<BlockOperatorProvider> provider) : provider_(std::move(provider)) {}
+
+ private:
+  std::unique_ptr<BlockOperatorProvider> provider_;
+
+  friend class BlockSchurPreconditioner;
 };
 
 /**
@@ -275,8 +295,7 @@ enum class BlockSchurType
 enum class SchurApproxType
 {
   DiagInv, /**< Use assembled \f$ S \approx A_{22} - A_{21} \\mathrm{diag}(A_{11})^{-1} A_{12} \f$. */
-  A22Only, /**< Use \f$ S \approx A_{22} \f$. */
-  Custom   /**< Use a custom operator provider for block index 1. */
+  A22Only  /**< Use \f$ S \approx A_{22} \f$. */
 };
 
 /**
@@ -295,13 +314,25 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
    * @param solvers Two solvers, for $ A_{11} $ and the Schur complement approximation.
    * @param type Preconditioner variant (diagonal, lower, upper, or full).
    * @param approxType Schur complement approximation strategy for the (1,1) block.
-   * @param overrides Optional provider overrides. Index 0 overrides $A_{11}$ and
-   *        index 1 provides a custom Schur operator when approxType is SchurApproxType::Custom.
+   * @param overrides Optional provider overrides for diagonal blocks other than the Schur approximation.
    */
   BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                            BlockSchurType type = BlockSchurType::Diagonal,
                            SchurApproxType approxType = SchurApproxType::DiagInv,
                            std::vector<BlockProviderOverride> overrides = {});
+
+  /**
+   * @brief Construct with a custom Schur operator.
+   *
+   * Supplying @a schur selects the custom Schur approximation and installs it
+   * for the second block of the 2x2 system.
+   *
+   * @param solvers Two solvers, for $ A_{11} $ and the Schur approximation.
+   * @param type Preconditioner variant (diagonal, lower, upper, or full).
+   * @param schur Operator source used for the Schur approximation.
+   */
+  BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers, BlockSchurType type,
+                           SchurOperator schur);
 
   /**
    * @brief The action of the precondition on the block vector (b_1, b_2)
@@ -323,6 +354,10 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
   virtual ~BlockSchurPreconditioner();
 
  private:
+  BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers, BlockSchurType type,
+                           std::optional<SchurApproxType> approx_type,
+                           std::vector<BlockProviderOverride> overrides);
+
   // The diagonal part of the preconditioner containing BoomerAMG applications
   std::unique_ptr<mfem::BlockOperator> solver_diag_;
 
@@ -333,14 +368,14 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
   // Schur complement approximation operator used by solver for block (1,1).
   //
   // For DiagInv and A22Only, the approximation is rebuilt on each SetOperator call and stored in
-  // S_approx_owned_. For Custom, the approximation is provided via block_op_providers_[1] and referenced
+  // S_approx_owned_. A custom approximation is provided via block_op_providers_[1] and referenced
   // non-owningly via S_approx_view_.
   mutable std::unique_ptr<const mfem::Operator> S_approx_owned_;
   const mfem::Operator* S_approx_view_ = nullptr;
 
   BlockSchurType type_;
 
-  SchurApproxType approxType_;
+  std::optional<SchurApproxType> approx_type_;
 
   /**
    * @brief The action of the lower sweep on the block vector (b_1, b_2)

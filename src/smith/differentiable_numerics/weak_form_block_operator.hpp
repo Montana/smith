@@ -108,4 +108,20 @@ BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
     std::vector<double> jacobian_weights, TimeInfo time_info, const BoundaryConditionManager* bc_manager,
     std::vector<StateBlockBinding> state_block_bindings);
 
+/**
+ * @brief Build a state-dependent Schur operator from a single-field weak form.
+ *
+ * The weak form is differentiated with respect to @a schur_field and refreshed
+ * from block 1 of the current nonlinear state. Essential dofs are copied from
+ * @a bc_manager when it is non-null.
+ *
+ * @param weak_form Weak form whose Jacobian approximates the Schur complement.
+ * @param shape_disp Mesh shape displacement used to assemble the weak form.
+ * @param schur_field Field updated from the Schur block at each nonlinear iterate.
+ * @param time_info Time information used to assemble the weak form.
+ * @param bc_manager Optional boundary conditions for the Schur field.
+ */
+SchurOperator weakFormSchur(const WeakForm& weak_form, FieldState shape_disp, FieldState schur_field,
+                            TimeInfo time_info, const BoundaryConditionManager* bc_manager = nullptr);
+
 }  // namespace smith

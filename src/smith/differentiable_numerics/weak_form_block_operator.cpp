@@ -219,4 +219,13 @@ BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
       copyEssentialTrueDofs(bc_manager), std::move(state_block_bindings));
 }
 
+SchurOperator weakFormSchur(const WeakForm& weak_form, FieldState shape_disp, FieldState schur_field,
+                            TimeInfo time_info, const BoundaryConditionManager* bc_manager)
+{
+  auto schur_override =
+      makeStateDependentWeakFormBlockProviderOverride(1, weak_form, std::move(shape_disp), {std::move(schur_field)},
+                                                      {1.0}, time_info, bc_manager, {StateBlockBinding{1, 0}});
+  return SchurOperator(std::move(schur_override.provider));
+}
+
 }  // namespace smith

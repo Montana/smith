@@ -92,6 +92,13 @@ void updateSolverForState(mfem::Solver* solver, const mfem::Vector& state, const
   }
 }
 
+std::vector<BlockProviderOverride> makeSchurOverrides(std::unique_ptr<BlockOperatorProvider> provider)
+{
+  std::vector<BlockProviderOverride> overrides;
+  overrides.emplace_back(1, std::move(provider));
+  return overrides;
+}
+
 }  // namespace
 
 BlockProviderOverride makeFixedBlockProviderOverride(int block_index, std::unique_ptr<const mfem::Operator> op)
@@ -329,17 +336,38 @@ BlockTriangularPreconditioner::~BlockTriangularPreconditioner() {}
 BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                                                    BlockSchurType type, SchurApproxType approxType,
                                                    std::vector<BlockProviderOverride> overrides)
-    : BlockPreconditioner(std::move(solvers)), solver_diag_(nullptr), type_(type), approxType_(approxType)
+    : BlockSchurPreconditioner(std::move(solvers), type, std::optional<SchurApproxType>(approxType),
+                               std::move(overrides))
+{
+}
+
+BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
+                                                   BlockSchurType type,
+                                                   std::optional<SchurApproxType> approx_type,
+                                                   std::vector<BlockProviderOverride> overrides)
+    : BlockPreconditioner(std::move(solvers)),
+      solver_diag_(nullptr),
+      type_(type),
+      approx_type_(std::move(approx_type))
 {
   block_op_providers_.resize(2);
   SLIC_ERROR_IF(mfem_solvers_.size() != 2, "This precondition is specifically for 2X2 block systems");
 
   applyOverrides(2, block_op_providers_, std::move(overrides));
 
-  if (approxType_ == SchurApproxType::Custom && !block_op_providers_[1]) {
-    throw std::invalid_argument(
-        "SchurApproxType::Custom requires an override provider for block index 1 (custom Schur operator)");
+  if (approx_type_ && block_op_providers_[1]) {
+    throw std::invalid_argument("Use the SchurOperator constructor to provide a custom Schur approximation");
   }
+  if (!approx_type_ && !block_op_providers_[1]) {
+    throw std::invalid_argument("Custom Schur approximation requires a non-null operator provider");
+  }
+}
+
+BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
+                                                   BlockSchurType type, SchurOperator schur)
+    : BlockSchurPreconditioner(std::move(solvers), type, std::nullopt,
+                               makeSchurOverrides(std::move(schur.provider_)))
+{
 }
 
 void BlockSchurPreconditioner::LowerBlock(const mfem::Vector& in, mfem::Vector& out) const
@@ -519,7 +547,10 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
   mfem_solvers_[0]->SetOperator(*op);
   mfem_solvers_[0]->iterative_mode = false;
   // Build Schur complement approximation
-  if (approxType_ == SchurApproxType::DiagInv) {
+  if (!approx_type_) {
+    S_approx_owned_.reset();
+    S_approx_view_ = &block_op_providers_[1]->currentOperator();
+  } else if (*approx_type_ == SchurApproxType::DiagInv) {
     auto* A11 = dynamic_cast<const mfem::HypreParMatrix*>(&A11_op);
     auto* A12 = dynamic_cast<const mfem::HypreParMatrix*>(&A12_op);
     auto* A21 = dynamic_cast<const mfem::HypreParMatrix*>(&A21_op);
@@ -530,16 +561,13 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
 
     S_approx_owned_.reset(BuildSchurDiagApprox_(*A11, *A12, *A21, *A22));
     S_approx_view_ = S_approx_owned_.get();
-  } else if (approxType_ == SchurApproxType::A22Only) {
+  } else if (*approx_type_ == SchurApproxType::A22Only) {
     auto* A22 = dynamic_cast<const mfem::HypreParMatrix*>(&A22_op);
 
     MFEM_VERIFY(A22, "A22 block must be a HypreParMatrix for A22Only Schur complement preconditioner.");
 
     S_approx_owned_.reset(new mfem::HypreParMatrix(*A22));
     S_approx_view_ = S_approx_owned_.get();
-  } else if (approxType_ == SchurApproxType::Custom) {
-    S_approx_owned_.reset();
-    S_approx_view_ = &block_op_providers_[1]->currentOperator();
   }
 
   MFEM_VERIFY(S_approx_view_, "Schur complement approximation operator must be set");
