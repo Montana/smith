@@ -73,6 +73,7 @@ EigenSystem calcEigensystem(const std::vector<double>& params, const std::vector
   // dense_hessian.Symmetrize();
 
   mfem::DenseMatrix dense_hessian = calcPseudoHessian(params, sim_vector);
+  dense_hessian.Symmetrize();
 
   mfem::Vector eigenvalues;
   mfem::DenseMatrix dense_eigenvectors;

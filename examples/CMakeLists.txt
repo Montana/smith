@@ -49,3 +49,6 @@ add_subdirectory(inertia_relief)
 
 # Add the obstacle design example
 add_subdirectory(obstacle_design)
+
+# Add material identifiability examples
+add_subdirectory(Kevin)
