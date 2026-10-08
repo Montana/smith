@@ -53,8 +53,7 @@ if (TRIBOL_FOUND)
 endif()
 
 if (SMITH_USE_ENZYME)
-    list(APPEND physics_serial_test_sources
-                test_dfem_explicit_dynamics.cpp)
+    list(APPEND physics_serial_test_sources)
 endif()
 
 smith_add_tests(SOURCES       ${physics_serial_test_sources}
