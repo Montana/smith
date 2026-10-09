@@ -56,8 +56,8 @@ struct SolidMechanicsSystem : public SystemBase {
   /// L2 projection weak form for PK1 stress output (dim*dim components).
   /// Args: (stress_unknown, u, u_old, v_old, a_old, coupling_fields..., params...).
   using StressOutputWeakFormType = FunctionalWeakForm<
-      dim, L2<0, dim * dim>,
-      typename detail::AppendCouplingToParams<Coupling, Parameters<L2<0, dim * dim>, H1<order, dim>, H1<order, dim>,
+      dim, L2<order - 1, dim * dim>,
+      typename detail::AppendCouplingToParams<Coupling, Parameters<L2<order - 1, dim * dim>, H1<order, dim>, H1<order, dim>,
                                                                    H1<order, dim>, H1<order, dim>>>::type>;
 
   std::shared_ptr<SolidWeakFormType> solid_weak_form;    ///< Solid mechanics weak form.
@@ -253,7 +253,7 @@ auto registerSolidMechanicsFields(std::shared_ptr<FieldStore> field_store,
 
   if (options.enable_stress_output) {
     auto stress_time_rule = std::make_shared<StaticTimeIntegrationRule>();
-    FieldType<L2<0, dim * dim>> stress_type("stress");
+    FieldType<L2<order - 1, dim * dim>> stress_type("stress");
     field_store->addIndependent(stress_type, stress_time_rule);
   }
 
@@ -351,7 +351,7 @@ auto buildSolidMechanicsSystemImpl(std::shared_ptr<FieldStore> field_store, cons
   }
 
   if (has_stress_output) {
-    FieldType<L2<0, dim * dim>> stress_type(field_store->prefix("stress"), true);
+    FieldType<L2<order - 1, dim * dim>> stress_type(field_store->prefix("stress"), true);
     FieldType<H1<order, dim>> disp_as_input(disp_type.name);
     std::string stress_name = field_store->prefix("stress_projection");
     sys->stress_weak_form = detail::buildWeakFormWithCoupling<typename SystemType::StressOutputWeakFormType>(
