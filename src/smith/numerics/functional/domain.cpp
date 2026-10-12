@@ -836,4 +836,92 @@ Domain operator|(const Domain& a, const Domain& b) { return set_operation(SET_OP
 Domain operator&(const Domain& a, const Domain& b) { return set_operation(SET_OPERATION::INTERSECTION, a, b); }
 Domain operator-(const Domain& a, const Domain& b) { return set_operation(SET_OPERATION::DIFFERENCE, a, b); }
 
+template <int d>
+Domain from_body_element_attribute_set(
+      const mesh_t& mesh,
+      std::string_view attribute_set_name) 
+{
+  assert(mesh.SpaceDimension() == d);
+  // attribute sets for body elements
+  auto& el_attr_sets = mesh.attribute_sets;
+
+  // wrap the string view in a string for API compatibility
+  const std::string set_name_str{attribute_set_name};
+
+  if( el_attr_sets.AttributeSetExists(set_name_str) ) {
+    // get the list of attributes by name
+    auto& attr_list = el_attr_sets.GetAttributeSet(set_name_str);
+
+    // predicate for domain from the attribute list
+    auto by_attr_list = [&attr_list](std::vector<tensor<double, d>>, int attr)
+    { return std::ranges::find(attr_list, attr) != attr_list.end(); };
+
+    auto domain = smith::Domain::ofElements(mesh, by_attr_list);
+    return domain;
+  } else {
+    SLIC_ERROR(std::format("The given attribute name '{}' was not found"
+        " in the body element attribute sets of the MFEM mesh.", attribute_set_name));
+    return smith::Domain{mesh, d, smith::Domain::Type::Elements};
+  }
+}
+
+Domain fromBodyElementAttributeSet(
+        const mesh_t& mesh,
+        std::string_view attribute_set_name) 
+{
+  switch (mesh.SpaceDimension()) {
+    case 2:
+      return from_body_element_attribute_set<2>(mesh, attribute_set_name);
+    case 3:
+      return from_body_element_attribute_set<3>(mesh, attribute_set_name);
+    default:
+      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      return smith::Domain{mesh, mesh.Dimension(), smith::Domain::Type::Elements};
+  }
+}
+
+template <int d>
+Domain from_boundary_element_attribute_set(
+      const mesh_t& mesh,
+      std::string_view attribute_set_name) 
+{
+  assert(mesh.SpaceDimension() == d);
+  // attribute sets for boundary elements
+  auto& el_attr_sets = mesh.bdr_attribute_sets;
+
+  // wrap the string view in a string for API compatibility
+  const std::string set_name_str{attribute_set_name};
+
+  if( el_attr_sets.AttributeSetExists(set_name_str) ) {
+    // get the list of attributes by name
+    auto& attr_list = el_attr_sets.GetAttributeSet(set_name_str);
+
+    // predicate for domain from the attribute list
+    auto by_attr_list = [&attr_list](std::vector<tensor<double, d>>, int attr)
+    { return std::ranges::find(attr_list, attr) != attr_list.end(); };
+
+    auto domain = smith::Domain::ofBoundaryElements(mesh, by_attr_list);
+    return domain;
+  } else {
+    SLIC_ERROR(std::format("The given attribute name '{}' was not found"
+        " in the boundary element attribute sets of the MFEM mesh.", attribute_set_name));
+    return smith::Domain{mesh, d, smith::Domain::Type::Elements};
+  }
+}
+
+Domain fromBoundaryElementAttributeSet(
+        const mesh_t& mesh,
+        std::string_view attribute_set_name) 
+{
+  switch (mesh.SpaceDimension()) {
+    case 2:
+      return from_boundary_element_attribute_set<2>(mesh, attribute_set_name);
+    case 3:
+      return from_boundary_element_attribute_set<3>(mesh, attribute_set_name);
+    default:
+      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      return smith::Domain{mesh, mesh.Dimension() - 1, smith::Domain::Type::BoundaryElements};
+  }
+}
+
 }  // namespace smith
