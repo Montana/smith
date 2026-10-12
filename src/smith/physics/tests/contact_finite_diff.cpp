@@ -6,10 +6,14 @@
 
 #include "smith/physics/solid_mechanics_contact.hpp"
 
+#include <csignal>
 #include <functional>
 #include <iomanip>
 #include <set>
 #include <string>
+
+#include <execinfo.h>
+#include <unistd.h>
 
 #include "axom/slic/core/SimpleLogger.hpp"
 #include "gtest/gtest.h"
@@ -31,6 +35,68 @@
 #include "tribol/interface/tribol.hpp"
 
 namespace smith {
+
+namespace {
+
+enum class ContactFiniteDiffPhase {
+  Setup,
+  FiniteDifference,
+  ContactStateReset,
+  TimestepAdvance,
+};
+
+volatile std::sig_atomic_t contact_finite_diff_phase = static_cast<std::sig_atomic_t>(ContactFiniteDiffPhase::Setup);
+
+void contactFiniteDiffWatchdogHandler(int)
+{
+  switch (static_cast<ContactFiniteDiffPhase>(contact_finite_diff_phase)) {
+    case ContactFiniteDiffPhase::Setup: {
+      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=setup\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      break;
+    }
+    case ContactFiniteDiffPhase::FiniteDifference: {
+      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=finite-difference\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      break;
+    }
+    case ContactFiniteDiffPhase::ContactStateReset: {
+      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=contact-state-reset\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      break;
+    }
+    case ContactFiniteDiffPhase::TimestepAdvance: {
+      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=timestep-advance\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      break;
+    }
+  }
+
+  void* call_stack[64];
+  int frame_count = ::backtrace(call_stack, 64);
+  ::backtrace_symbols_fd(call_stack, frame_count, STDERR_FILENO);
+  ::_exit(124);
+}
+
+class ContactFiniteDiffWatchdog {
+ public:
+  ContactFiniteDiffWatchdog()
+  {
+    void* call_stack[1];
+    (void)::backtrace(call_stack, 1);
+    (void)std::signal(SIGALRM, contactFiniteDiffWatchdogHandler);
+    ::alarm(60);
+  }
+
+  ~ContactFiniteDiffWatchdog() { ::alarm(0); }
+
+  void setPhase(ContactFiniteDiffPhase phase)
+  {
+    contact_finite_diff_phase = static_cast<std::sig_atomic_t>(phase);
+  }
+};
+
+}  // namespace
 
 class ContactFiniteDiff3D : public testing::TestWithParam<std::pair<ContactEnforcement, std::string>> {};
 
@@ -61,6 +127,7 @@ TEST_P(ContactFiniteDiff3D, patch)
   constexpr double eps = 1.0e-7;
 
   MPI_Barrier(MPI_COMM_WORLD);
+  ContactFiniteDiffWatchdog watchdog;
 
   // Create DataStore
   std::string name = "contact_fd_" + GetParam().second;
@@ -174,6 +241,7 @@ TEST_P(ContactFiniteDiff3D, patch)
   constexpr int n_steps = 3;
   double dt = 1.0 / static_cast<double>(n_steps);
   for (int i{0}; i < n_steps; ++i) {
+    watchdog.setPhase(ContactFiniteDiffPhase::FiniteDifference);
     double max_diff = 0.0;
     auto& u = solid_solver.displacement();
     auto pressure = solid_solver.pressure();
@@ -225,8 +293,10 @@ TEST_P(ContactFiniteDiff3D, patch)
     }
     std::cout << "Max diff = " << std::setprecision(15) << max_diff << std::endl;
     // Reset contact to the correct states (non-finite differenced) before advancing to the next step
+    watchdog.setPhase(ContactFiniteDiffPhase::ContactStateReset);
     f = 0.0;
     oper->Mult(merged_sol, f);
+    watchdog.setPhase(ContactFiniteDiffPhase::TimestepAdvance);
     solid_solver.advanceTimestep(dt);
   }
 }
@@ -252,6 +322,7 @@ TEST_P(ContactFiniteDiff2D, patch)
   constexpr double eps = 1.0e-7;
 
   MPI_Barrier(MPI_COMM_WORLD);
+  ContactFiniteDiffWatchdog watchdog;
 
   // Create DataStore
   std::string name = "contact_fd_2D_" + GetParam().name;
@@ -354,6 +425,7 @@ TEST_P(ContactFiniteDiff2D, patch)
   constexpr int n_steps = 3;
   double dt = 1.0 / static_cast<double>(n_steps);
   for (int i{0}; i < n_steps; ++i) {
+    watchdog.setPhase(ContactFiniteDiffPhase::FiniteDifference);
     double max_diff = 0.0;
     auto& u = solid_solver.displacement();
     auto pressure = solid_solver.pressure();
@@ -405,8 +477,10 @@ TEST_P(ContactFiniteDiff2D, patch)
     std::cout << "Max diff = " << std::setprecision(15) << max_diff << std::endl;
 
     // Reset contact to the non-finite-differenced state before advancing to the next step.
+    watchdog.setPhase(ContactFiniteDiffPhase::ContactStateReset);
     f = 0.0;
     oper->Mult(merged_sol, f);
+    watchdog.setPhase(ContactFiniteDiffPhase::TimestepAdvance);
     solid_solver.advanceTimestep(dt);
   }
 }
