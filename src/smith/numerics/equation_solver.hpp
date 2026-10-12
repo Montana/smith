@@ -14,7 +14,6 @@
 
 #include <memory>
 #include <optional>
-#include <ostream>
 #include <variant>
 #include <utility>
 
@@ -169,7 +168,7 @@ class SuperLUSolver : public mfem::Solver {
    * @param[in] comm The MPI communicator used by the vectors and matrices in the solve
    * @param[in] print_level The verbosity level for the mfem::SuperLUSolver
    */
-  SuperLUSolver(int print_level, MPI_Comm comm) : print_diagnostics_(print_level > 0), superlu_solver_(comm)
+  SuperLUSolver(int print_level, MPI_Comm comm) : superlu_solver_(comm)
   {
     superlu_solver_.SetColumnPermutation(mfem::superlu::PARMETIS);
     if (print_level == 0) {
@@ -196,15 +195,6 @@ class SuperLUSolver : public mfem::Solver {
   void SetOperator(const mfem::Operator& op);
 
  private:
-  void printDiagnostic(const char* message) const
-  {
-    if (print_diagnostics_) {
-      mfem::out << message << std::endl;
-    }
-  }
-
-  bool print_diagnostics_;
-
   /**
    * @brief The owner of the SuperLU matrix for the gradient, stored
    * as a member variable for lifetime purposes
@@ -236,7 +226,7 @@ class StrumpackSolver : public mfem::Solver {
    * @param[in] comm The MPI communicator used by the vectors and matrices in the solve
    * @param[in] print_level The verbosity level for the mfem::STRUMPACKSolver
    */
-  StrumpackSolver(int print_level, MPI_Comm comm) : print_diagnostics_(print_level > 0), strumpack_solver_(comm)
+  StrumpackSolver(int print_level, MPI_Comm comm) : strumpack_solver_(comm)
   {
     strumpack_solver_.SetKrylovSolver(strumpack::KrylovSolver::DIRECT);
     strumpack_solver_.SetReorderingStrategy(strumpack::ReorderingStrategy::METIS);
@@ -264,15 +254,6 @@ class StrumpackSolver : public mfem::Solver {
   void SetOperator(const mfem::Operator& op);
 
  private:
-  void printDiagnostic(const char* message) const
-  {
-    if (print_diagnostics_) {
-      mfem::out << message << std::endl;
-    }
-  }
-
-  bool print_diagnostics_;
-
   /**
    * @brief The owner of the Strumpack matrix for the gradient, stored
    * as a member variable for lifetime purposes
