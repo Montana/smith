@@ -24,8 +24,7 @@ namespace smith::examples::kevin {
  * @brief Green-Saint Venant thermoelastic material with Fourier heat conduction.
  *
  * The first call operator makes temperature an externally managed mechanics parameter. The second provides the
- * constitutive tuple required by a coupled thermal-mechanics system. Both add a fixed initial-displacement gradient
- * to the incremental displacement gradient before evaluating stress.
+ * constitutive tuple required by a coupled thermal-mechanics system.
  */
 
 template <int dim = 2>
@@ -35,27 +34,21 @@ struct ThermomechanicalLCE {
   /**
    * @brief Evaluate stress when temperature is supplied as a finite-element parameter field.
    */
-  template <typename GradUType, typename GradVType, typename TemperatureFieldType,
-            typename InitialDisplacementFieldType>
+  template <typename GradUType, typename GradVType, typename TemperatureFieldType>
   auto operator()(const TimeInfo&, State&, const GradUType& grad_u, const GradVType&,
-                  const TemperatureFieldType& temperature_field,
-                  const InitialDisplacementFieldType& initial_displacement_field) const
+                  const TemperatureFieldType& temperature_field) const
   {
-    const auto total_grad_u = grad_u + get<DERIVATIVE>(initial_displacement_field);
-    return firstPiolaStress(total_grad_u, get<VALUE>(temperature_field));
+    return firstPiolaStress(grad_u, get<VALUE>(temperature_field));
   }
 
   /**
    * @brief Evaluate the stress, heat capacity, heat source, and heat flux for coupled thermo-mechanics.
    */
-  template <typename GradUType, typename GradVType, typename TemperatureType, typename TemperatureGradientType,
-            typename InitialDisplacementFieldType>
+  template <typename GradUType, typename GradVType, typename TemperatureType, typename TemperatureGradientType>
   auto operator()(const TimeInfo&, State&, const GradUType& grad_u, const GradVType& grad_v,
-                  const TemperatureType& temperature, const TemperatureGradientType& grad_temperature,
-                  const InitialDisplacementFieldType& initial_displacement_field) const
+                  const TemperatureType& temperature, const TemperatureGradientType& grad_temperature) const
   {
-    const auto total_grad_u = grad_u + get<DERIVATIVE>(initial_displacement_field);
-    auto stress = firstPiolaStress(total_grad_u, temperature);
+    auto stress = firstPiolaStress(grad_u, temperature);
     auto heat_source = 0.0 * tr(grad_v);
     auto heat_flux = -thermal_conductivity * grad_temperature;
     return tuple{stress, heat_capacity, heat_source, heat_flux};
@@ -134,27 +127,21 @@ struct ThermoelasticMaterial {
   /**
    * @brief Evaluate stress when temperature is supplied as a finite-element parameter field.
    */
-  template <typename GradUType, typename GradVType, typename TemperatureFieldType,
-            typename InitialDisplacementFieldType>
+  template <typename GradUType, typename GradVType, typename TemperatureFieldType>
   auto operator()(const TimeInfo&, State&, const GradUType& grad_u, const GradVType&,
-                  const TemperatureFieldType& temperature_field,
-                  const InitialDisplacementFieldType& initial_displacement_field) const
+                  const TemperatureFieldType& temperature_field) const
   {
-    const auto total_grad_u = grad_u + get<DERIVATIVE>(initial_displacement_field);
-    return firstPiolaStress(total_grad_u, get<VALUE>(temperature_field));
+    return firstPiolaStress(grad_u, get<VALUE>(temperature_field));
   }
 
   /**
    * @brief Evaluate the stress, heat capacity, heat source, and heat flux for coupled thermo-mechanics.
    */
-  template <typename GradUType, typename GradVType, typename TemperatureType, typename TemperatureGradientType,
-            typename InitialDisplacementFieldType>
+  template <typename GradUType, typename GradVType, typename TemperatureType, typename TemperatureGradientType>
   auto operator()(const TimeInfo&, State&, const GradUType& grad_u, const GradVType& grad_v,
-                  const TemperatureType& temperature, const TemperatureGradientType& grad_temperature,
-                  const InitialDisplacementFieldType& initial_displacement_field) const
+                  const TemperatureType& temperature, const TemperatureGradientType& grad_temperature) const
   {
-    const auto total_grad_u = grad_u + get<DERIVATIVE>(initial_displacement_field);
-    auto stress = firstPiolaStress(total_grad_u, temperature);
+    auto stress = firstPiolaStress(grad_u, temperature);
     auto heat_source = 0.0 * tr(grad_v);
     auto heat_flux = -thermal_conductivity * grad_temperature;
     return tuple{stress, heat_capacity, heat_source, heat_flux};

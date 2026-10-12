@@ -59,24 +59,19 @@ int main(int argc, char* argv[])
                                                   .print_level = 0};
 
   auto field_store = std::make_shared<smith::FieldStore>(mesh, 100);
-  // The generic Cauchy-stress projector only sees the incremental displacement, so retain PK1 output when using an
-  // initial-displacement offset.
-  smith::SolidMechanicsOptions solid_options{.enable_stress_output = true, .output_cauchy_stress = false};
+  smith::SolidMechanicsOptions solid_options{.enable_stress_output = true, .output_cauchy_stress = true};
   auto solid_fields = smith::registerSolidMechanicsFields<dim, order, smith::QuasiStaticSecondOrderTimeIntegrationRule>(
       field_store, solid_options);
   auto thermal_fields =
       smith::registerThermalFields<dim, order, smith::BackwardEulerFirstOrderTimeIntegrationRule>(field_store);
-  auto parameter_fields =
-      smith::registerParameterFields(field_store, smith::FieldType<smith::H1<order, dim>>("initial_displacement"));
-
   auto make_solver = [&]() {
     return std::make_shared<smith::SystemSolver>(
         smith::buildNonlinearBlockSolver(nonlinear_options, linear_options, *mesh));
   };
   auto solid_system = smith::buildSolidMechanicsSystem(make_solver(), solid_options, solid_fields,
-                                                       smith::couplingFields(thermal_fields), parameter_fields);
+                                                       smith::couplingFields(thermal_fields));
   auto thermal_system = smith::buildThermalSystem(make_solver(), smith::ThermalOptions{}, thermal_fields,
-                                                  smith::couplingFields(solid_fields), parameter_fields);
+                                                  smith::couplingFields(solid_fields));
 
   smith::examples::kevin::ThermoelasticMaterial material;
   smith::setCoupledThermoMechanicsMaterial(solid_system, thermal_system, material, mesh->entireBodyName());
@@ -97,20 +92,18 @@ int main(int argc, char* argv[])
 
   constexpr double dt = 0.25;
   constexpr int num_steps = 4;
-  auto initial_displacement = field_store->getParameter("param_initial_displacement");
 
   // TimeInfo evaluates loads at time + dt. Start at -dt to solve the t = 0 coupled equilibrium without advancing the
-  // clock, then store the total displacement as a fixed offset and reset the evolving incremental fields to zero. The
-  // combined system returns the thermal unknown first and the mechanical unknown second.
+  // clock, then use the solved fields as the initial histories. The combined system returns the thermal unknown first
+  // and the mechanical unknown second.
   {
     const smith::TimeInfo initial_time_info(-dt, dt);
     const auto initial_fields = coupled_system->solve(initial_time_info);
     *field_store->getField("temperature_solve_state").get() = *initial_fields[0].get();
     *field_store->getField("temperature").get() = *initial_fields[0].get();
-    *initial_displacement.get() = *initial_fields[1].get();
 
-    *field_store->getField("displacement_solve_state").get() = 0.0;
-    *field_store->getField("displacement").get() = 0.0;
+    *field_store->getField("displacement_solve_state").get() = *initial_fields[1].get();
+    *field_store->getField("displacement").get() = *initial_fields[1].get();
     *field_store->getField("velocity").get() = 0.0;
     *field_store->getField("acceleration").get() = 0.0;
 

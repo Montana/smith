@@ -16,10 +16,17 @@ smith_add_executable(NAME       dynamic_temperature_quasistatic_mechanics
                      OUTPUT_DIR ${EXAMPLE_OUTPUT_DIRECTORY}
                      DEPENDS_ON smith)
 
+smith_add_executable(NAME       constrained_temperature_stress
+                     SOURCES    constrained_temperature_stress.cpp
+                                thermoelastic_material.hpp
+                     OUTPUT_DIR ${EXAMPLE_OUTPUT_DIRECTORY}
+                     DEPENDS_ON smith)
+
 install(
     FILES
         prescribed_temperature_mechanics.cpp
         dynamic_temperature_quasistatic_mechanics.cpp
+        constrained_temperature_stress.cpp
         thermoelastic_material.hpp
     DESTINATION
         examples/smith/Kevin
@@ -31,5 +38,8 @@ if(SMITH_ENABLE_TESTS)
                  NUM_MPI_TASKS 1)
     blt_add_test(NAME          dynamic_temperature_quasistatic_mechanics
                  COMMAND       dynamic_temperature_quasistatic_mechanics
+                 NUM_MPI_TASKS 1)
+    blt_add_test(NAME          constrained_temperature_stress
+                 COMMAND       constrained_temperature_stress
                  NUM_MPI_TASKS 1)
 endif()
