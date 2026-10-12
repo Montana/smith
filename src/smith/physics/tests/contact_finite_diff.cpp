@@ -72,6 +72,10 @@ void contactFiniteDiffWatchdogHandler(int)
     }
   }
 
+#ifdef MFEM_USE_STRUMPACK
+  writeStrumpackDiagnosticSnapshots(STDERR_FILENO);
+#endif
+
   void* call_stack[64];
   int frame_count = ::backtrace(call_stack, 64);
   ::backtrace_symbols_fd(call_stack, frame_count, STDERR_FILENO);

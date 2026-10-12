@@ -217,6 +217,11 @@ class SuperLUSolver : public mfem::Solver {
 
 #ifdef MFEM_USE_STRUMPACK
 /**
+ * @brief Writes the recent STRUMPACK matrix and right-hand-side diagnostic snapshots to a file descriptor.
+ */
+void writeStrumpackDiagnosticSnapshots(int file_descriptor);
+
+/**
  * @brief A wrapper class for using the MFEM Strumpack solver with a HypreParMatrix
  */
 class StrumpackSolver : public mfem::Solver {
