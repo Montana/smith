@@ -11,11 +11,7 @@
 #include "smith/numerics/trust_region_subspace_cache.hpp"
 
 #include <array>
-#include <csignal>
-#include <cstdint>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <deque>
 #include <functional>
 #include <iomanip>
@@ -28,8 +24,6 @@
 #include <tuple>
 #include <utility>
 
-#include <unistd.h>
-
 #include "smith/smith_config.hpp"
 #include "smith/infrastructure/profiling.hpp"
 #include "smith/numerics/trust_region_solver.hpp"
@@ -38,160 +32,6 @@
 namespace smith {
 
 namespace {
-
-#ifdef MFEM_USE_STRUMPACK
-
-constexpr std::size_t STRUMPACK_DIAGNOSTIC_HISTORY_SIZE = 16;
-constexpr std::size_t STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE = 512;
-
-std::array<std::array<char, STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE>, STRUMPACK_DIAGNOSTIC_HISTORY_SIZE>
-    strumpack_diagnostic_messages{};
-volatile std::sig_atomic_t strumpack_diagnostic_lengths[STRUMPACK_DIAGNOSTIC_HISTORY_SIZE]{};
-std::uint64_t strumpack_diagnostic_sequence = 0;
-
-std::uint64_t hashBytes(std::uint64_t hash, const void* data, std::size_t size)
-{
-  constexpr std::uint64_t FNV_PRIME = 1099511628211ULL;
-  const auto* bytes = static_cast<const unsigned char*>(data);
-  for (std::size_t i = 0; i < size; ++i) {
-    hash ^= bytes[i];
-    hash *= FNV_PRIME;
-  }
-  return hash;
-}
-
-template <typename T>
-std::uint64_t hashValue(std::uint64_t hash, const T& value)
-{
-  return hashBytes(hash, &value, sizeof(value));
-}
-
-struct StrumpackDiagnosticSnapshot {
-  int rank;
-  int comm_size;
-  long long global_rows;
-  long long local_rows;
-  long long begin_row;
-  long long end_row;
-  long long local_nnz;
-  bool distribution_valid;
-  bool row_pointers_valid;
-  bool column_indices_valid;
-  bool matrix_values_finite;
-  bool rhs_size_valid;
-  bool rhs_values_finite;
-  std::uint64_t matrix_hash;
-  std::uint64_t rhs_hash;
-};
-
-StrumpackDiagnosticSnapshot inspectStrumpackInputs(const mfem::STRUMPACKRowLocMatrix& matrix,
-                                                   const mfem::Vector& rhs)
-{
-  constexpr std::uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
-  const auto* strumpack_matrix = matrix.GetA();
-  const auto& distribution = strumpack_matrix->dist();
-  const auto global_rows = strumpack_matrix->size();
-  const auto local_rows = strumpack_matrix->local_rows();
-  const auto local_nnz = strumpack_matrix->local_nnz();
-  const auto begin_row = strumpack_matrix->begin_row();
-  const auto end_row = strumpack_matrix->end_row();
-  const auto* row_pointers = strumpack_matrix->ptr();
-  const auto* column_indices = strumpack_matrix->ind();
-  const auto* matrix_values = strumpack_matrix->val();
-
-  int rank = 0;
-  int comm_size = 0;
-  MPI_Comm_rank(matrix.GetComm(), &rank);
-  MPI_Comm_size(matrix.GetComm(), &comm_size);
-  const std::size_t rank_index = static_cast<std::size_t>(rank);
-
-  bool distribution_valid = distribution.size() == static_cast<std::size_t>(comm_size + 1) &&
-                            distribution.front() == 0 && distribution.back() == global_rows &&
-                            distribution[rank_index] == begin_row && distribution[rank_index + 1] == end_row;
-  for (std::size_t i = 1; i < distribution.size(); ++i) {
-    distribution_valid = distribution_valid && distribution[i - 1] <= distribution[i];
-  }
-
-  bool row_pointers_valid = row_pointers[0] == 0 && row_pointers[local_rows] == local_nnz;
-  for (int row = 0; row < local_rows; ++row) {
-    row_pointers_valid = row_pointers_valid && row_pointers[row] <= row_pointers[row + 1] &&
-                         row_pointers[row] >= 0 && row_pointers[row + 1] <= local_nnz;
-  }
-
-  bool column_indices_valid = true;
-  bool matrix_values_finite = true;
-  std::uint64_t matrix_hash = FNV_OFFSET_BASIS;
-  matrix_hash = hashValue(matrix_hash, global_rows);
-  matrix_hash = hashValue(matrix_hash, local_rows);
-  matrix_hash = hashValue(matrix_hash, local_nnz);
-  for (const auto& row_offset : distribution) {
-    matrix_hash = hashValue(matrix_hash, row_offset);
-  }
-  for (int row = 0; row <= local_rows; ++row) {
-    matrix_hash = hashValue(matrix_hash, row_pointers[row]);
-  }
-  for (int entry = 0; entry < local_nnz; ++entry) {
-    column_indices_valid = column_indices_valid && column_indices[entry] >= 0 && column_indices[entry] < global_rows;
-    matrix_values_finite = matrix_values_finite && std::isfinite(matrix_values[entry]);
-    matrix_hash = hashValue(matrix_hash, column_indices[entry]);
-    matrix_hash = hashValue(matrix_hash, matrix_values[entry]);
-  }
-
-  const double* rhs_values = rhs.HostRead();
-  const bool rhs_size_valid = rhs.Size() == local_rows;
-  bool rhs_values_finite = true;
-  std::uint64_t rhs_hash = FNV_OFFSET_BASIS;
-  for (int i = 0; i < rhs.Size(); ++i) {
-    rhs_values_finite = rhs_values_finite && std::isfinite(rhs_values[i]);
-    rhs_hash = hashValue(rhs_hash, rhs_values[i]);
-  }
-
-  return {rank,
-          comm_size,
-          static_cast<long long>(global_rows),
-          static_cast<long long>(local_rows),
-          static_cast<long long>(begin_row),
-          static_cast<long long>(end_row),
-          static_cast<long long>(local_nnz),
-          distribution_valid,
-          row_pointers_valid,
-          column_indices_valid,
-          matrix_values_finite,
-          rhs_size_valid,
-          rhs_values_finite,
-          matrix_hash,
-          rhs_hash};
-}
-
-void recordStrumpackDiagnosticSnapshot(const mfem::STRUMPACKRowLocMatrix& matrix, const mfem::Vector& rhs)
-{
-  const auto snapshot = inspectStrumpackInputs(matrix, rhs);
-  const std::uint64_t sequence = strumpack_diagnostic_sequence++;
-  const std::size_t slot = static_cast<std::size_t>(sequence % STRUMPACK_DIAGNOSTIC_HISTORY_SIZE);
-  strumpack_diagnostic_lengths[slot] = 0;
-  auto& message = strumpack_diagnostic_messages[slot];
-  const int length = std::snprintf(
-      message.data(), message.size(),
-      "STRUMPACK snapshot seq=%llu rank=%d/%d rows=%lld local_rows=%lld row_range=[%lld,%lld) local_nnz=%lld "
-      "valid_dist=%d valid_ptr=%d valid_col=%d finite_matrix=%d valid_rhs_size=%d finite_rhs=%d matrix_hash=%016llx "
-      "rhs_size=%d rhs_hash=%016llx\n",
-      static_cast<unsigned long long>(sequence), snapshot.rank, snapshot.comm_size, snapshot.global_rows,
-      snapshot.local_rows, snapshot.begin_row, snapshot.end_row, snapshot.local_nnz, snapshot.distribution_valid,
-      snapshot.row_pointers_valid, snapshot.column_indices_valid, snapshot.matrix_values_finite,
-      snapshot.rhs_size_valid, snapshot.rhs_values_finite, static_cast<unsigned long long>(snapshot.matrix_hash),
-      rhs.Size(),
-      static_cast<unsigned long long>(snapshot.rhs_hash));
-  if (length > 0) {
-    strumpack_diagnostic_lengths[slot] =
-        static_cast<std::sig_atomic_t>(std::min(length, static_cast<int>(STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE - 1)));
-  }
-
-  SLIC_ERROR_ROOT_IF(!snapshot.distribution_valid || !snapshot.row_pointers_valid || !snapshot.column_indices_valid ||
-                         !snapshot.matrix_values_finite || !snapshot.rhs_size_valid || !snapshot.rhs_values_finite,
-                     "Invalid STRUMPACK matrix or right-hand side detected before solve.");
-}
-
-#endif
 
 size_t rootOnlyPrintLevel(const mfem::NewtonSolver& solver, size_t level)
 {
@@ -1321,23 +1161,9 @@ void SuperLUSolver::SetOperator(const mfem::Operator& op)
 
 #ifdef MFEM_USE_STRUMPACK
 
-void writeStrumpackDiagnosticSnapshots(int file_descriptor)
-{
-  static constexpr char header[] = "Recent STRUMPACK input snapshots:\n";
-  (void)::write(file_descriptor, header, sizeof(header) - 1);
-  for (std::size_t slot = 0; slot < STRUMPACK_DIAGNOSTIC_HISTORY_SIZE; ++slot) {
-    const std::sig_atomic_t length = strumpack_diagnostic_lengths[slot];
-    if (length > 0) {
-      (void)::write(file_descriptor, strumpack_diagnostic_messages[slot].data(), static_cast<std::size_t>(length));
-    }
-  }
-}
-
 void StrumpackSolver::Mult(const mfem::Vector& input, mfem::Vector& output) const
 {
   SLIC_ERROR_ROOT_IF(!strumpack_mat_, "Operator must be set prior to solving with Strumpack");
-  MFEM_DEVICE_SYNC;
-  recordStrumpackDiagnosticSnapshot(*strumpack_mat_, input);
 
   // Use the underlying MFEM-based solver and Strumpack matrix type to solve the system
   strumpack_solver_.Mult(input, output);
@@ -1345,8 +1171,6 @@ void StrumpackSolver::Mult(const mfem::Vector& input, mfem::Vector& output) cons
 
 void StrumpackSolver::SetOperator(const mfem::Operator& op)
 {
-  MFEM_DEVICE_SYNC;
-
   // Check if this is a block operator
   auto* block_operator = dynamic_cast<const mfem::BlockOperator*>(&op);
 

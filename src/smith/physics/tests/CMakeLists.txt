@@ -62,10 +62,7 @@ smith_add_tests(SOURCES       ${physics_serial_test_sources}
                 NUM_MPI_TASKS 1)
 
 if (TRIBOL_FOUND AND ENZYME_FOUND AND ENABLE_HIP)
-    set_property(TEST contact_finite_diff APPEND PROPERTY ENVIRONMENT
-                 "MPICH_GPU_SUPPORT_ENABLED=0"
-                 "MPICH_ENV_DISPLAY=1"
-                 "MPICH_COLL_OPT_OFF=MPI_Alltoallv")
+    set_property(TEST contact_finite_diff APPEND PROPERTY ENVIRONMENT "MPICH_COLL_OPT_OFF=MPI_Alltoallv")
 endif()
 
 if (SMITH_USE_ENZYME)

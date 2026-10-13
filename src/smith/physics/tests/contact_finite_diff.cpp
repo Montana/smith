@@ -6,18 +6,10 @@
 
 #include "smith/physics/solid_mechanics_contact.hpp"
 
-#include <algorithm>
-#include <array>
-#include <csignal>
-#include <cstdint>
-#include <cstdio>
 #include <functional>
 #include <iomanip>
 #include <set>
 #include <string>
-
-#include <execinfo.h>
-#include <unistd.h>
 
 #include "axom/slic/core/SimpleLogger.hpp"
 #include "gtest/gtest.h"
@@ -38,153 +30,7 @@
 #include "smith/infrastructure/application_manager.hpp"
 #include "tribol/interface/tribol.hpp"
 
-namespace {
-
-constexpr std::size_t MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE = 16;
-constexpr std::size_t MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE = 384;
-
-std::array<std::array<char, MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE>, MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE>
-    mpi_alltoallv_diagnostic_messages{};
-volatile std::sig_atomic_t mpi_alltoallv_diagnostic_lengths[MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE]{};
-volatile std::sig_atomic_t mpi_alltoallv_diagnostic_sequence = 0;
-
-void recordMpiAlltoallvDiagnostic(const void* send_buffer, const int* send_counts, const int* send_displacements,
-                                  MPI_Datatype send_datatype, void* receive_buffer, const int* receive_counts,
-                                  const int* receive_displacements, MPI_Datatype receive_datatype,
-                                  MPI_Comm communicator)
-{
-  int rank = -1;
-  int communicator_size = -1;
-  int send_datatype_size = -1;
-  int receive_datatype_size = -1;
-  (void)PMPI_Comm_rank(communicator, &rank);
-  (void)PMPI_Comm_size(communicator, &communicator_size);
-  (void)PMPI_Type_size(send_datatype, &send_datatype_size);
-  (void)PMPI_Type_size(receive_datatype, &receive_datatype_size);
-
-  long long total_send_count = 0;
-  long long total_receive_count = 0;
-  for (int index = 0; index < communicator_size; ++index) {
-    total_send_count += send_counts[index];
-    total_receive_count += receive_counts[index];
-  }
-
-  const int self_send_count = rank >= 0 ? send_counts[rank] : -1;
-  const int self_receive_count = rank >= 0 ? receive_counts[rank] : -1;
-  const int self_send_displacement = rank >= 0 ? send_displacements[rank] : -1;
-  const int self_receive_displacement = rank >= 0 ? receive_displacements[rank] : -1;
-  const std::sig_atomic_t sequence = mpi_alltoallv_diagnostic_sequence;
-  mpi_alltoallv_diagnostic_sequence = sequence + 1;
-  const std::size_t slot = static_cast<std::size_t>(sequence) % MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE;
-  mpi_alltoallv_diagnostic_lengths[slot] = 0;
-  auto& message = mpi_alltoallv_diagnostic_messages[slot];
-  const int length = std::snprintf(
-      message.data(), message.size(),
-      "MPI_Alltoallv snapshot seq=%d rank=%d/%d send_total=%lld receive_total=%lld self_send=%d self_receive=%d "
-      "self_send_displacement=%d self_receive_displacement=%d send_datatype_size=%d receive_datatype_size=%d "
-      "send_buffer=%p receive_buffer=%p\n",
-      static_cast<int>(sequence), rank, communicator_size, total_send_count, total_receive_count, self_send_count,
-      self_receive_count, self_send_displacement, self_receive_displacement, send_datatype_size,
-      receive_datatype_size, const_cast<void*>(send_buffer), receive_buffer);
-  if (length > 0) {
-    mpi_alltoallv_diagnostic_lengths[slot] = static_cast<std::sig_atomic_t>(
-        std::min(length, static_cast<int>(MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE - 1)));
-  }
-}
-
-void writeMpiAlltoallvDiagnosticSnapshots(int file_descriptor)
-{
-  static constexpr char header[] = "Recent MPI_Alltoallv snapshots:\n";
-  (void)::write(file_descriptor, header, sizeof(header) - 1);
-  for (std::size_t slot = 0; slot < MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE; ++slot) {
-    const std::sig_atomic_t length = mpi_alltoallv_diagnostic_lengths[slot];
-    if (length > 0) {
-      (void)::write(file_descriptor, mpi_alltoallv_diagnostic_messages[slot].data(), static_cast<std::size_t>(length));
-    }
-  }
-}
-
-}  // namespace
-
-extern "C" int MPI_Alltoallv(const void* send_buffer, const int* send_counts, const int* send_displacements,
-                             MPI_Datatype send_datatype, void* receive_buffer, const int* receive_counts,
-                             const int* receive_displacements, MPI_Datatype receive_datatype,
-                             MPI_Comm communicator)
-{
-  recordMpiAlltoallvDiagnostic(send_buffer, send_counts, send_displacements, send_datatype, receive_buffer,
-                               receive_counts, receive_displacements, receive_datatype, communicator);
-  return PMPI_Alltoallv(send_buffer, send_counts, send_displacements, send_datatype, receive_buffer, receive_counts,
-                        receive_displacements, receive_datatype, communicator);
-}
-
 namespace smith {
-
-namespace {
-
-enum class ContactFiniteDiffPhase {
-  Setup,
-  FiniteDifference,
-  ContactStateReset,
-  TimestepAdvance,
-};
-
-volatile std::sig_atomic_t contact_finite_diff_phase = static_cast<std::sig_atomic_t>(ContactFiniteDiffPhase::Setup);
-
-void contactFiniteDiffWatchdogHandler(int)
-{
-  switch (static_cast<ContactFiniteDiffPhase>(contact_finite_diff_phase)) {
-    case ContactFiniteDiffPhase::Setup: {
-      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=setup\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      break;
-    }
-    case ContactFiniteDiffPhase::FiniteDifference: {
-      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=finite-difference\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      break;
-    }
-    case ContactFiniteDiffPhase::ContactStateReset: {
-      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=contact-state-reset\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      break;
-    }
-    case ContactFiniteDiffPhase::TimestepAdvance: {
-      static constexpr char message[] = "Contact finite-difference watchdog timeout: phase=timestep-advance\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      break;
-    }
-  }
-
-#ifdef MFEM_USE_STRUMPACK
-  writeStrumpackDiagnosticSnapshots(STDERR_FILENO);
-#endif
-  writeMpiAlltoallvDiagnosticSnapshots(STDERR_FILENO);
-
-  void* call_stack[64];
-  int frame_count = ::backtrace(call_stack, 64);
-  ::backtrace_symbols_fd(call_stack, frame_count, STDERR_FILENO);
-  ::_exit(124);
-}
-
-class ContactFiniteDiffWatchdog {
- public:
-  ContactFiniteDiffWatchdog()
-  {
-    void* call_stack[1];
-    (void)::backtrace(call_stack, 1);
-    (void)std::signal(SIGALRM, contactFiniteDiffWatchdogHandler);
-    ::alarm(60);
-  }
-
-  ~ContactFiniteDiffWatchdog() { ::alarm(0); }
-
-  void setPhase(ContactFiniteDiffPhase phase)
-  {
-    contact_finite_diff_phase = static_cast<std::sig_atomic_t>(phase);
-  }
-};
-
-}  // namespace
 
 class ContactFiniteDiff3D : public testing::TestWithParam<std::pair<ContactEnforcement, std::string>> {};
 
@@ -215,7 +61,6 @@ TEST_P(ContactFiniteDiff3D, patch)
   constexpr double eps = 1.0e-7;
 
   MPI_Barrier(MPI_COMM_WORLD);
-  ContactFiniteDiffWatchdog watchdog;
 
   // Create DataStore
   std::string name = "contact_fd_" + GetParam().second;
@@ -245,7 +90,13 @@ TEST_P(ContactFiniteDiff3D, patch)
   mesh->addDomainOfBoundaryElements("z0_face", smith::by_attr<dim>(1));
   mesh->addDomainOfBoundaryElements("zmax_face", smith::by_attr<dim>(8));
 
-  LinearSolverOptions linear_options{.linear_solver = LinearSolver::SuperLU, .print_level = 0};
+#ifdef MFEM_USE_STRUMPACK
+  LinearSolverOptions linear_options{.linear_solver = LinearSolver::Strumpack, .print_level = 0};
+#else
+  LinearSolverOptions linear_options{};
+  SLIC_INFO_ROOT("Contact requires MFEM built with strumpack.");
+  return;
+#endif
 
   // Do a single iteration per timestep to check gradient for each iteration
   NonlinearSolverOptions nonlinear_options{.nonlin_solver = NonlinearSolver::Newton,
@@ -323,7 +174,6 @@ TEST_P(ContactFiniteDiff3D, patch)
   constexpr int n_steps = 3;
   double dt = 1.0 / static_cast<double>(n_steps);
   for (int i{0}; i < n_steps; ++i) {
-    watchdog.setPhase(ContactFiniteDiffPhase::FiniteDifference);
     double max_diff = 0.0;
     auto& u = solid_solver.displacement();
     auto pressure = solid_solver.pressure();
@@ -375,10 +225,8 @@ TEST_P(ContactFiniteDiff3D, patch)
     }
     std::cout << "Max diff = " << std::setprecision(15) << max_diff << std::endl;
     // Reset contact to the correct states (non-finite differenced) before advancing to the next step
-    watchdog.setPhase(ContactFiniteDiffPhase::ContactStateReset);
     f = 0.0;
     oper->Mult(merged_sol, f);
-    watchdog.setPhase(ContactFiniteDiffPhase::TimestepAdvance);
     solid_solver.advanceTimestep(dt);
   }
 }
@@ -404,7 +252,6 @@ TEST_P(ContactFiniteDiff2D, patch)
   constexpr double eps = 1.0e-7;
 
   MPI_Barrier(MPI_COMM_WORLD);
-  ContactFiniteDiffWatchdog watchdog;
 
   // Create DataStore
   std::string name = "contact_fd_2D_" + GetParam().name;
@@ -430,7 +277,13 @@ TEST_P(ContactFiniteDiff2D, patch)
   mesh->addDomainOfBoundaryElements("y0_faces", smith::by_attr<dim>(8));
   mesh->addDomainOfBoundaryElements("ymax_face", smith::by_attr<dim>(9));
 
-  LinearSolverOptions linear_options{.linear_solver = LinearSolver::SuperLU, .print_level = 0};
+#ifdef MFEM_USE_STRUMPACK
+  LinearSolverOptions linear_options{.linear_solver = LinearSolver::Strumpack, .print_level = 0};
+#else
+  LinearSolverOptions linear_options{};
+  SLIC_INFO_ROOT("Contact requires MFEM built with strumpack.");
+  return;
+#endif
 
   // Do a single iteration per timestep to check gradient for each iteration
   NonlinearSolverOptions nonlinear_options{.nonlin_solver = NonlinearSolver::Newton,
@@ -501,7 +354,6 @@ TEST_P(ContactFiniteDiff2D, patch)
   constexpr int n_steps = 3;
   double dt = 1.0 / static_cast<double>(n_steps);
   for (int i{0}; i < n_steps; ++i) {
-    watchdog.setPhase(ContactFiniteDiffPhase::FiniteDifference);
     double max_diff = 0.0;
     auto& u = solid_solver.displacement();
     auto pressure = solid_solver.pressure();
@@ -553,10 +405,8 @@ TEST_P(ContactFiniteDiff2D, patch)
     std::cout << "Max diff = " << std::setprecision(15) << max_diff << std::endl;
 
     // Reset contact to the non-finite-differenced state before advancing to the next step.
-    watchdog.setPhase(ContactFiniteDiffPhase::ContactStateReset);
     f = 0.0;
     oper->Mult(merged_sol, f);
-    watchdog.setPhase(ContactFiniteDiffPhase::TimestepAdvance);
     solid_solver.advanceTimestep(dt);
   }
 }
