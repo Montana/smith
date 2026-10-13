@@ -59,6 +59,8 @@ std::unique_ptr<mfem::HypreParMatrix> buildWeakFormOperator(const WeakForm& weak
 
 /**
  * @brief Build a callable that updates bound weak-form fields from state and assembles the weak-form operator.
+ *
+ * @note @a weak_form must outlive the returned callable.
  */
 StateDependentWeakFormOperator makeStateDependentWeakFormOperator(const WeakForm& weak_form, FieldState shape_disp,
                                                                   std::vector<FieldState> fields,
@@ -68,6 +70,8 @@ StateDependentWeakFormOperator makeStateDependentWeakFormOperator(const WeakForm
 
 /**
  * @brief Build a callable using essential dofs copied from a boundary-condition manager.
+ *
+ * @note @a weak_form must outlive the returned callable.
  */
 StateDependentWeakFormOperator makeStateDependentWeakFormOperator(const WeakForm& weak_form, FieldState shape_disp,
                                                                   std::vector<FieldState> fields,
@@ -94,6 +98,9 @@ BlockProviderOverride makeWeakFormBlockProviderOverride(int block_index, const W
 
 /**
  * @brief Build a state-dependent block override from a weak-form Jacobian operator.
+ *
+ * @note @a weak_form must outlive the returned provider and every preconditioner
+ *       to which that provider is supplied.
  */
 BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
     int block_index, const WeakForm& weak_form, FieldState shape_disp, std::vector<FieldState> fields,
@@ -102,11 +109,31 @@ BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
 
 /**
  * @brief Build a state-dependent block override using essential dofs copied from a boundary-condition manager.
+ *
+ * @note @a weak_form must outlive the returned provider and every preconditioner
+ *       to which that provider is supplied.
  */
 BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
     int block_index, const WeakForm& weak_form, FieldState shape_disp, std::vector<FieldState> fields,
     std::vector<double> jacobian_weights, TimeInfo time_info, const BoundaryConditionManager* bc_manager,
     std::vector<StateBlockBinding> state_block_bindings);
+
+/**
+ * @brief Build a fixed assembled Schur operator from a weak form.
+ *
+ * The weak form is assembled once using the supplied fields and Jacobian weights.
+ * Essential dofs are copied from @a bc_manager when it is non-null.
+ *
+ * @param weak_form Weak form whose Jacobian approximates the Schur complement.
+ * @param shape_disp Mesh shape displacement used to assemble the weak form.
+ * @param fields Fields at which the weak form is evaluated.
+ * @param jacobian_weights Weights selecting the weak-form Jacobian contributions.
+ * @param time_info Time information used to assemble the weak form.
+ * @param bc_manager Optional boundary conditions for the Schur operator.
+ */
+SchurOperator weakFormSchur(const WeakForm& weak_form, FieldState shape_disp, std::vector<FieldState> fields,
+                            std::vector<double> jacobian_weights, TimeInfo time_info,
+                            const BoundaryConditionManager* bc_manager = nullptr);
 
 /**
  * @brief Build a state-dependent Schur operator from a single-field weak form.

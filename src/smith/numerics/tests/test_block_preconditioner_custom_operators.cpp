@@ -334,10 +334,72 @@ class OperatorLifetimeCheckingSolver : public mfem::Solver {
   std::shared_ptr<bool> current_operator_alive_;
 };
 
+class LifetimeTrackedPreconditioner : public mfem::Solver {
+ public:
+  explicit LifetimeTrackedPreconditioner(std::shared_ptr<bool> alive) : alive_(std::move(alive)) { *alive_ = true; }
+
+  ~LifetimeTrackedPreconditioner() override { *alive_ = false; }
+
+  void SetOperator(const mfem::Operator& op) override
+  {
+    height = op.Height();
+    width = op.Width();
+  }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+ private:
+  std::shared_ptr<bool> alive_;
+};
+
+class PreconditionerLifetimeCheckingSolver : public mfem::Solver {
+ public:
+  PreconditionerLifetimeCheckingSolver(std::shared_ptr<bool> preconditioner_alive, std::shared_ptr<bool> lifetime_ok)
+      : preconditioner_alive_(std::move(preconditioner_alive)), lifetime_ok_(std::move(lifetime_ok))
+  {
+  }
+
+  ~PreconditionerLifetimeCheckingSolver() override
+  {
+    if (!*preconditioner_alive_) {
+      *lifetime_ok_ = false;
+    }
+  }
+
+  void SetOperator(const mfem::Operator& op) override
+  {
+    height = op.Height();
+    width = op.Width();
+  }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+ private:
+  std::shared_ptr<bool> preconditioner_alive_;
+  std::shared_ptr<bool> lifetime_ok_;
+};
+
 }  // namespace
 /* ============================================================
    Tests
    ============================================================ */
+
+TEST(SolverWithPreconditioner, OwnedPreconditionerOutlivesLinearSolverReference)
+{
+  auto preconditioner_alive = std::make_shared<bool>(false);
+  auto lifetime_ok = std::make_shared<bool>(true);
+
+  {
+    auto linear_solver = std::make_unique<PreconditionerLifetimeCheckingSolver>(preconditioner_alive, lifetime_ok);
+    auto preconditioner = std::make_unique<LifetimeTrackedPreconditioner>(preconditioner_alive);
+    smith::SolverWithPreconditioner solver(std::move(linear_solver), std::move(preconditioner));
+    EXPECT_NE(solver.preconditioner(), nullptr);
+    EXPECT_TRUE(*preconditioner_alive);
+  }
+
+  EXPECT_TRUE(*lifetime_ok);
+  EXPECT_FALSE(*preconditioner_alive);
+}
 
 // Makes sure an error is thrown when length of solvers does not match the
 // number of blocks
@@ -618,9 +680,7 @@ TEST(BlockSchurPreconditionerCustom, FullWithExactSchurOperatorIsExactInverse)
   solvers.push_back(std::make_unique<Exact2x2Solver>());
   solvers.push_back(std::make_unique<Exact2x2Solver>());
 
-  auto schur_override =
-      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
-  smith::SchurOperator schur(std::move(schur_override.provider));
+  smith::SchurOperator schur(std::move(override_mats[0].A));
 
   smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Full, std::move(schur));
   P.SetOperator(A);
@@ -731,9 +791,7 @@ TEST(BlockSchurPreconditionerCustom, CustomOverrideNotConsumedOnRepeatedSetOpera
   std::vector<OwnedHypreParMatrix> override_mats;
   override_mats.push_back(makeHypreScaledIdentity(n, 7.0));
 
-  auto schur_override =
-      smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
-  smith::SchurOperator schur(std::move(schur_override.provider));
+  smith::SchurOperator schur(std::move(override_mats[0].A));
 
   smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 

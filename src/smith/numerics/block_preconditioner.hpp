@@ -83,6 +83,12 @@ struct BlockProviderOverride {
 class SchurOperator {
  public:
   /**
+   * @brief Construct from an owned fixed Schur operator.
+   * @param op Fixed assembled Schur operator.
+   */
+  explicit SchurOperator(std::unique_ptr<const mfem::Operator> op);
+
+  /**
    * @brief Construct from an owned operator provider.
    * @param provider Provider supplying the Schur operator.
    */
@@ -363,8 +369,7 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
 
  private:
   BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers, BlockSchurType type,
-                           std::optional<SchurApproxType> approx_type,
-                           std::vector<BlockProviderOverride> overrides);
+                           std::optional<SchurApproxType> approx_type, std::vector<BlockProviderOverride> overrides);
 
   // The diagonal part of the preconditioner containing BoomerAMG applications
   std::unique_ptr<mfem::BlockOperator> solver_diag_;
@@ -376,10 +381,8 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
   // Schur complement approximation operator used by solver for block (1,1).
   //
   // For DiagInv and A22Only, the approximation is rebuilt on each SetOperator call and stored in
-  // S_approx_owned_. A custom approximation is provided via block_op_providers_[1] and referenced
-  // non-owningly via S_approx_view_.
+  // S_approx_owned_. A custom assembled approximation is retained by block_op_providers_[1].
   mutable std::unique_ptr<const mfem::Operator> S_approx_owned_;
-  const mfem::Operator* S_approx_view_ = nullptr;
 
   BlockSchurType type_;
 

@@ -301,9 +301,8 @@ TEST_P(BlockPreconditionerTest, BlockSolve)
       linear_options.block_schur_type = smith::BlockSchurType::Full;
       std::vector<double> jacobian_weights{0.0, 1.0, 0.0};
 
-      auto schur_override = smith::makeWeakFormBlockProviderOverride(
-          1, T2_form, shape_disp, T2_arguments, jacobian_weights, time_info, T2_bc_manager.get());
-      smith::SchurOperator schur(std::move(schur_override.provider));
+      auto schur =
+          smith::weakFormSchur(T2_form, shape_disp, T2_arguments, jacobian_weights, time_info, T2_bc_manager.get());
 
       auto solvers =
           smith::buildBlockPreconditionerSubSolvers(linear_options.sub_block_linear_solver_options, mesh->getComm());

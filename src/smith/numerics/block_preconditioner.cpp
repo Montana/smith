@@ -111,6 +111,11 @@ std::vector<BlockProviderOverride> makeSchurOverrides(std::unique_ptr<BlockOpera
 
 }  // namespace
 
+SchurOperator::SchurOperator(std::unique_ptr<const mfem::Operator> op)
+    : provider_(std::make_unique<FixedBlockOperatorProvider>(std::move(op)))
+{
+}
+
 BlockProviderOverride makeFixedBlockProviderOverride(int block_index, std::unique_ptr<const mfem::Operator> op)
 {
   return {block_index, std::make_unique<FixedBlockOperatorProvider>(std::move(op))};
@@ -358,13 +363,9 @@ BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<m
 }
 
 BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
-                                                   BlockSchurType type,
-                                                   std::optional<SchurApproxType> approx_type,
+                                                   BlockSchurType type, std::optional<SchurApproxType> approx_type,
                                                    std::vector<BlockProviderOverride> overrides)
-    : BlockPreconditioner(std::move(solvers)),
-      solver_diag_(nullptr),
-      type_(type),
-      approx_type_(std::move(approx_type))
+    : BlockPreconditioner(std::move(solvers)), solver_diag_(nullptr), type_(type), approx_type_(std::move(approx_type))
 {
   block_op_providers_.resize(2);
   SLIC_ERROR_IF(mfem_solvers_.size() != 2, "This precondition is specifically for 2X2 block systems");
@@ -381,8 +382,7 @@ BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<m
 
 BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                                                    BlockSchurType type, SchurOperator schur)
-    : BlockSchurPreconditioner(std::move(solvers), type, std::nullopt,
-                               makeSchurOverrides(std::move(schur.provider_)))
+    : BlockSchurPreconditioner(std::move(solvers), type, std::nullopt, makeSchurOverrides(std::move(schur.provider_)))
 {
 }
 
@@ -526,7 +526,6 @@ double matrixNorm(const mfem::HypreParMatrix& K)
 
 void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
 {
-  S_approx_view_ = nullptr;
   std::unique_ptr<const mfem::Operator> pending_s_approx;
   const mfem::Operator* next_s_approx = nullptr;
   height = jacobian.Height();
@@ -599,7 +598,6 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
   } else {
     S_approx_owned_ = std::move(pending_s_approx);
   }
-  S_approx_view_ = next_s_approx;
   mfem_solvers_[1]->iterative_mode = false;
 
   // Set up block diagonal operator
