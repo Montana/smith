@@ -104,6 +104,11 @@ void updateSolverForState(mfem::Solver* solver, const mfem::Vector& state, const
 
 }  // namespace
 
+SchurOperator::SchurOperator(std::unique_ptr<const mfem::Operator> op)
+    : provider_(std::make_unique<FixedBlockOperatorProvider>(std::move(op)))
+{
+}
+
 BlockProviderOverride makeFixedBlockProviderOverride(int block_index, std::unique_ptr<const mfem::Operator> op)
 {
   return {block_index, std::make_unique<FixedBlockOperatorProvider>(std::move(op))};
@@ -581,7 +586,6 @@ double matrixNorm(const mfem::HypreParMatrix& K)
 
 void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
 {
-  S_approx_view_ = nullptr;
   std::unique_ptr<const mfem::Operator> pending_s_approx;
   const mfem::Operator* next_s_approx = nullptr;
   height = jacobian.Height();
@@ -657,7 +661,6 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
     } else {
       S_approx_owned_ = std::move(pending_s_approx);
     }
-    S_approx_view_ = next_s_approx;
   }
   mfem_solvers_[1]->iterative_mode = false;
 

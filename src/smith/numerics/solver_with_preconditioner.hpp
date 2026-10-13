@@ -24,7 +24,7 @@ class SolverWithPreconditioner : public StateDependentSolver {
   /// @param linear_solver Owned linear solver (must be non-null).
   /// @param preconditioner Owned preconditioner (may be null).
   SolverWithPreconditioner(std::unique_ptr<mfem::Solver> linear_solver, std::unique_ptr<mfem::Solver> preconditioner)
-      : linear_solver_(std::move(linear_solver)), preconditioner_(std::move(preconditioner))
+      : preconditioner_(std::move(preconditioner)), linear_solver_(std::move(linear_solver))
   {
     MFEM_VERIFY(linear_solver_ != nullptr, "SolverWithPreconditioner requires a non-null linear solver");
   }
@@ -65,8 +65,9 @@ class SolverWithPreconditioner : public StateDependentSolver {
   mfem::Solver* preconditioner() const { return preconditioner_.get(); }
 
  private:
-  std::unique_ptr<mfem::Solver> linear_solver_;
+  // Declared first so it is destroyed after the linear solver that references it.
   std::unique_ptr<mfem::Solver> preconditioner_;
+  std::unique_ptr<mfem::Solver> linear_solver_;
 };
 
 }  // namespace smith

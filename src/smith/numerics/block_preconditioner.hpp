@@ -323,6 +323,12 @@ class SchurComplementActionSolver : public StateDependentSolver {
 class SchurOperator {
  public:
   /**
+   * @brief Construct from an owned fixed Schur operator.
+   * @param op Fixed assembled Schur operator.
+   */
+  explicit SchurOperator(std::unique_ptr<const mfem::Operator> op);
+
+  /**
    * @brief Construct an assembled Schur-operator input.
    * @param provider Provider supplying the Schur operator.
    */
@@ -420,10 +426,9 @@ class BlockSchurPreconditioner : public BlockPreconditioner {
   // Schur complement approximation operator used by solver for block (1,1).
   //
   // For DiagInv and A22Only, the approximation is rebuilt on each SetOperator call and stored in
-  // S_approx_owned_. A custom approximation is provided via block_op_providers_[1] and referenced
-  // non-owningly via S_approx_view_. A direct inverse action is configured directly.
+  // S_approx_owned_. A custom assembled approximation is retained by block_op_providers_[1]. A direct inverse
+  // action is configured directly.
   mutable std::unique_ptr<const mfem::Operator> S_approx_owned_;
-  const mfem::Operator* S_approx_view_ = nullptr;
 
   BlockSchurType type_;
 

@@ -219,6 +219,14 @@ BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
       copyEssentialTrueDofs(bc_manager), std::move(state_block_bindings));
 }
 
+SchurOperator weakFormSchur(const WeakForm& weak_form, FieldState shape_disp, std::vector<FieldState> fields,
+                            std::vector<double> jacobian_weights, TimeInfo time_info,
+                            const BoundaryConditionManager* bc_manager)
+{
+  return SchurOperator(buildWeakFormOperator(weak_form, std::move(shape_disp), std::move(fields),
+                                             std::move(jacobian_weights), time_info, bc_manager));
+}
+
 SchurOperator weakFormSchur(const WeakForm& weak_form, FieldState shape_disp, FieldState schur_field,
                             TimeInfo time_info, const BoundaryConditionManager* bc_manager)
 {
