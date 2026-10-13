@@ -41,8 +41,8 @@ namespace {
 
 #ifdef MFEM_USE_STRUMPACK
 
-constexpr int STRUMPACK_DIAGNOSTIC_HISTORY_SIZE = 16;
-constexpr int STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE = 512;
+constexpr std::size_t STRUMPACK_DIAGNOSTIC_HISTORY_SIZE = 16;
+constexpr std::size_t STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE = 512;
 
 std::array<std::array<char, STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE>, STRUMPACK_DIAGNOSTIC_HISTORY_SIZE>
     strumpack_diagnostic_messages{};
@@ -103,10 +103,11 @@ StrumpackDiagnosticSnapshot inspectStrumpackInputs(const mfem::STRUMPACKRowLocMa
   int comm_size = 0;
   MPI_Comm_rank(matrix.GetComm(), &rank);
   MPI_Comm_size(matrix.GetComm(), &comm_size);
+  const std::size_t rank_index = static_cast<std::size_t>(rank);
 
   bool distribution_valid = distribution.size() == static_cast<std::size_t>(comm_size + 1) &&
                             distribution.front() == 0 && distribution.back() == global_rows &&
-                            distribution[rank] == begin_row && distribution[rank + 1] == end_row;
+                            distribution[rank_index] == begin_row && distribution[rank_index + 1] == end_row;
   for (std::size_t i = 1; i < distribution.size(); ++i) {
     distribution_valid = distribution_valid && distribution[i - 1] <= distribution[i];
   }
@@ -166,7 +167,7 @@ void recordStrumpackDiagnosticSnapshot(const mfem::STRUMPACKRowLocMatrix& matrix
 {
   const auto snapshot = inspectStrumpackInputs(matrix, rhs);
   const std::uint64_t sequence = strumpack_diagnostic_sequence++;
-  const int slot = static_cast<int>(sequence % STRUMPACK_DIAGNOSTIC_HISTORY_SIZE);
+  const std::size_t slot = static_cast<std::size_t>(sequence % STRUMPACK_DIAGNOSTIC_HISTORY_SIZE);
   strumpack_diagnostic_lengths[slot] = 0;
   auto& message = strumpack_diagnostic_messages[slot];
   const int length = std::snprintf(
@@ -182,7 +183,7 @@ void recordStrumpackDiagnosticSnapshot(const mfem::STRUMPACKRowLocMatrix& matrix
       static_cast<unsigned long long>(snapshot.rhs_hash));
   if (length > 0) {
     strumpack_diagnostic_lengths[slot] =
-        static_cast<std::sig_atomic_t>(std::min(length, STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE - 1));
+        static_cast<std::sig_atomic_t>(std::min(length, static_cast<int>(STRUMPACK_DIAGNOSTIC_MESSAGE_SIZE - 1)));
   }
 
   SLIC_ERROR_ROOT_IF(!snapshot.distribution_valid || !snapshot.row_pointers_valid || !snapshot.column_indices_valid ||
@@ -1324,7 +1325,7 @@ void writeStrumpackDiagnosticSnapshots(int file_descriptor)
 {
   static constexpr char header[] = "Recent STRUMPACK input snapshots:\n";
   (void)::write(file_descriptor, header, sizeof(header) - 1);
-  for (int slot = 0; slot < STRUMPACK_DIAGNOSTIC_HISTORY_SIZE; ++slot) {
+  for (std::size_t slot = 0; slot < STRUMPACK_DIAGNOSTIC_HISTORY_SIZE; ++slot) {
     const std::sig_atomic_t length = strumpack_diagnostic_lengths[slot];
     if (length > 0) {
       (void)::write(file_descriptor, strumpack_diagnostic_messages[slot].data(), static_cast<std::size_t>(length));
