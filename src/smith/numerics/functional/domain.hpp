@@ -308,33 +308,29 @@ inline auto by_attr(std::set<int> values)
 /// @brief Import a domain from the attribute set of the mfem mesh.
 /// Search attributes of body elements.
 ///
-/// The mfem mesh defines named "AttributeSets" which map a name to a 
+/// The mfem mesh defines named "AttributeSets" which map a name to a
 /// set of element attributes. This creates a smith::Domain with the
 /// elements corresponding to those attributes and the same name.
 ///
 ///
 /// @param mesh the mfem mesh
-/// @param attribute_set_name the name to search for, and to give to the 
+/// @param attribute_set_name the name to search for, and to give to the
 ///   created domain
 /// @return a smith::Domain corresponding to the attribute set name
-smith::Domain fromBodyElementAttributeSet(
-        const mesh_t& mesh,
-        std::string_view attribute_set_name);
+smith::Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name);
 
 /// @brief Import a domain from the attribute set of the mfem mesh.
 /// Search attributes of boundary elements.
 ///
-/// The mfem mesh defines named "AttributeSets" which map a name to a 
+/// The mfem mesh defines named "AttributeSets" which map a name to a
 /// set of element attributes. This creates a smith::Domain with the
 /// elements corresponding to those attributes and the same name.
 ///
 /// @param mesh the mfem mesh
-/// @param attribute_set_name the name to search for, and to give to the 
+/// @param attribute_set_name the name to search for, and to give to the
 ///   created domain
 /// @return a smith::Domain corresponding to the attribute set name
-smith::Domain fromBoundaryElementAttributeSet(
-        const mesh_t& mesh,
-        std::string_view attribute_set_name);
+smith::Domain fromBoundaryElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name);
 
 /**
  * @brief count the number of elements of each geometry in a domain

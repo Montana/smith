@@ -525,7 +525,8 @@ TEST(domain, ofInteriorBoundaryElements)
   EXPECT_NEAR(calculatedArea, expectedArea, 1e-6);
 }
 
-TEST(domain, fromBodyElementAttributeSet) {
+TEST(domain, fromBodyElementAttributeSet)
+{
   auto meshInput = buildMeshFromFile(SMITH_REPO_DIR "/mfem/data/compass.msh");
   auto mesh = smith::mesh::refineAndDistribute(std::move(meshInput), 0, 0);
 
