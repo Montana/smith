@@ -45,23 +45,33 @@ class StateDependentBlockOperatorProvider : public BlockOperatorProvider {
 
   void updateForState(const mfem::Vector& state, const mfem::Array<int>& block_offsets) override
   {
-    op_ = builder_(state, block_offsets);
-    if (!op_) {
+    auto pending_op = builder_(state, block_offsets);
+    if (!pending_op) {
       throw std::invalid_argument("State-dependent block operator builder returned a null operator");
     }
+    pending_op_ = std::move(pending_op);
   }
 
   const mfem::Operator& currentOperator() const override
   {
-    MFEM_VERIFY(op_,
+    const auto* current_op = pending_op_ ? pending_op_.get() : op_.get();
+    MFEM_VERIFY(current_op,
                 "State-dependent block operator builder has no current operator; call updateForState first or "
                 "provide an initial operator");
-    return *op_;
+    return *current_op;
+  }
+
+  void notifyOperatorSet() override
+  {
+    if (pending_op_) {
+      op_ = std::move(pending_op_);
+    }
   }
 
  private:
   StateDependentBlockOperatorBuilder builder_;
   std::unique_ptr<mfem::Operator> op_;
+  std::unique_ptr<mfem::Operator> pending_op_;
 };
 
 void applyOverrides(int num_blocks, std::vector<std::unique_ptr<BlockOperatorProvider>>& block_op_providers,
@@ -90,13 +100,6 @@ void updateSolverForState(mfem::Solver* solver, const mfem::Vector& state, const
   if (auto* state_dependent_solver = dynamic_cast<StateDependentSolver*>(solver)) {
     state_dependent_solver->updateForState(state, block_offsets);
   }
-}
-
-std::vector<BlockProviderOverride> makeSchurOverrides(std::unique_ptr<BlockOperatorProvider> provider)
-{
-  std::vector<BlockProviderOverride> overrides;
-  overrides.emplace_back(1, std::move(provider));
-  return overrides;
 }
 
 }  // namespace
@@ -135,7 +138,7 @@ void BlockPreconditioner::updateForState(const mfem::Vector& state, const mfem::
   }
 }
 
-BlockPreconditioner::~BlockPreconditioner() {}
+BlockPreconditioner::~BlockPreconditioner() { mfem_solvers_.clear(); }
 
 BlockDiagonalPreconditioner::BlockDiagonalPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                                                          std::vector<BlockProviderOverride> overrides)
@@ -175,6 +178,9 @@ void BlockDiagonalPreconditioner::SetOperator(const mfem::Operator& jacobian)
     }
 
     mfem_solvers_[si]->SetOperator(*op);
+    if (block_op_providers_[si]) {
+      block_op_providers_[si]->notifyOperatorSet();
+    }
     mfem_solvers_[si]->iterative_mode = false;
 
     // Place the solver into the diagonal block of solver_diag_
@@ -327,6 +333,9 @@ void BlockTriangularPreconditioner::SetOperator(const mfem::Operator& jacobian)
     }
 
     mfem_solvers_[si]->SetOperator(*op);
+    if (block_op_providers_[si]) {
+      block_op_providers_[si]->notifyOperatorSet();
+    }
     mfem_solvers_[si]->iterative_mode = false;
   }
 }
@@ -336,44 +345,85 @@ BlockTriangularPreconditioner::~BlockTriangularPreconditioner() {}
 BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                                                    BlockSchurType type, SchurApproxType approxType,
                                                    std::vector<BlockProviderOverride> overrides)
-    : BlockSchurPreconditioner(std::move(solvers), type, std::optional<SchurApproxType>(approxType),
-                               std::move(overrides))
-{
-}
-
-BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
-                                                   BlockSchurType type,
-                                                   std::optional<SchurApproxType> approx_type,
-                                                   std::vector<BlockProviderOverride> overrides)
-    : BlockPreconditioner(std::move(solvers)),
-      solver_diag_(nullptr),
-      type_(type),
-      approx_type_(std::move(approx_type))
+    : BlockPreconditioner(std::move(solvers)), solver_diag_(nullptr), type_(type), approx_type_(approxType)
 {
   block_op_providers_.resize(2);
   SLIC_ERROR_IF(mfem_solvers_.size() != 2, "This precondition is specifically for 2X2 block systems");
 
   applyOverrides(2, block_op_providers_, std::move(overrides));
 
-  if (approx_type_ && block_op_providers_[1]) {
+  if (block_op_providers_[1]) {
     throw std::invalid_argument("Use the SchurOperator constructor to provide a custom Schur approximation");
   }
-  if (!approx_type_ && !block_op_providers_[1]) {
-    throw std::invalid_argument("Custom Schur approximation requires a non-null operator provider");
+}
+
+/**
+ * @brief Construction-time inputs normalized from assembled and direct-action Schur forms.
+ */
+struct BlockSchurPreconditioner::SchurSetup {
+  std::vector<std::unique_ptr<mfem::Solver>> solvers;   ///< Two block solvers, including a direct action when supplied.
+  BlockSchurType type;                                  ///< Requested block-Schur factorization.
+  std::unique_ptr<BlockOperatorProvider> provider;      ///< Assembled Schur operator provider, when supplied.
+  SchurComplementActionSolver* schur_action = nullptr;  ///< Non-owning direct inverse action stored in @ref solvers.
+};
+
+BlockSchurPreconditioner::SchurSetup BlockSchurPreconditioner::makeSchurSetup(
+    std::vector<std::unique_ptr<mfem::Solver>> solvers, BlockSchurType type, SchurOperator schur)
+{
+  if (!schur.provider_) {
+    throw std::invalid_argument("Custom Schur operator requires a non-null operator provider");
+  }
+  if (solvers.size() != 2) {
+    throw std::invalid_argument("An assembled Schur operator requires exactly two block solvers");
+  }
+  return {std::move(solvers), type, std::move(schur.provider_), nullptr};
+}
+
+BlockSchurPreconditioner::SchurSetup BlockSchurPreconditioner::makeSchurSetup(
+    std::vector<std::unique_ptr<mfem::Solver>> a11_solvers, BlockSchurType type,
+    std::unique_ptr<SchurComplementActionSolver> schur_action)
+{
+  if (!schur_action) {
+    throw std::invalid_argument("Schur inverse action must be non-null");
+  }
+  if (a11_solvers.size() != 1) {
+    throw std::invalid_argument("A direct Schur inverse action requires exactly one A11 solver");
+  }
+  auto* schur_action_ptr = schur_action.get();
+  a11_solvers.push_back(std::move(schur_action));
+  return {std::move(a11_solvers), type, nullptr, schur_action_ptr};
+}
+
+BlockSchurPreconditioner::BlockSchurPreconditioner(SchurSetup setup)
+    : BlockPreconditioner(std::move(setup.solvers)),
+      solver_diag_(nullptr),
+      type_(setup.type),
+      approx_type_(std::nullopt),
+      schur_action_(setup.schur_action)
+{
+  SLIC_ERROR_IF(mfem_solvers_.size() != 2, "This precondition is specifically for 2X2 block systems");
+  if (!schur_action_) {
+    block_op_providers_[1] = std::move(setup.provider);
   }
 }
 
 BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> solvers,
                                                    BlockSchurType type, SchurOperator schur)
-    : BlockSchurPreconditioner(std::move(solvers), type, std::nullopt,
-                               makeSchurOverrides(std::move(schur.provider_)))
+    : BlockSchurPreconditioner(makeSchurSetup(std::move(solvers), type, std::move(schur)))
 {
 }
 
-void SchurComplementActionSolver::setBlockContext(const mfem::BlockOperator& jacobian,
-                                                  const mfem::Array<int>& block_offsets)
+BlockSchurPreconditioner::BlockSchurPreconditioner(std::vector<std::unique_ptr<mfem::Solver>> a11_solvers,
+                                                   BlockSchurType type,
+                                                   std::unique_ptr<SchurComplementActionSolver> schur_action)
+    : BlockSchurPreconditioner(makeSchurSetup(std::move(a11_solvers), type, std::move(schur_action)))
 {
-  MFEM_VERIFY(block_offsets.Size() == 3, "SchurComplementActionSolver requires 2x2 block offsets");
+}
+
+void SchurComplementActionSolver::setBlockContext(const mfem::BlockOperator& jacobian)
+{
+  const auto& block_offsets = jacobian.RowOffsets();
+  MFEM_VERIFY(block_offsets.Size() == 3, "SchurComplementActionSolver requires a 2x2 block operator");
   block_jacobian_ = &jacobian;
   block_offsets_ = block_offsets;
   height = block_offsets[2] - block_offsets[1];
@@ -532,6 +582,8 @@ double matrixNorm(const mfem::HypreParMatrix& K)
 void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
 {
   S_approx_view_ = nullptr;
+  std::unique_ptr<const mfem::Operator> pending_s_approx;
+  const mfem::Operator* next_s_approx = nullptr;
   height = jacobian.Height();
   width = jacobian.Width();
   block_jacobian_ = dynamic_cast<const mfem::BlockOperator*>(&jacobian);
@@ -566,11 +618,15 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
     op = &A11_op;  // use Jacobian diagonal block
   }
   mfem_solvers_[0]->SetOperator(*op);
+  if (block_op_providers_[0]) {
+    block_op_providers_[0]->notifyOperatorSet();
+  }
   mfem_solvers_[0]->iterative_mode = false;
   // Build Schur complement approximation
-  if (!approx_type_) {
-    S_approx_owned_.reset();
-    S_approx_view_ = &block_op_providers_[1]->currentOperator();
+  if (schur_action_) {
+    schur_action_->setBlockContext(*block_jacobian_);
+  } else if (!approx_type_) {
+    next_s_approx = &block_op_providers_[1]->currentOperator();
   } else if (*approx_type_ == SchurApproxType::DiagInv) {
     auto* A11 = dynamic_cast<const mfem::HypreParMatrix*>(&A11_op);
     auto* A12 = dynamic_cast<const mfem::HypreParMatrix*>(&A12_op);
@@ -580,27 +636,28 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
     MFEM_VERIFY(A11 && A12 && A21 && A22,
                 "All blocks must be HypreParMatrix for assembled Schur complement preconditioner.");
 
-    S_approx_owned_.reset(BuildSchurDiagApprox_(*A11, *A12, *A21, *A22));
-    S_approx_view_ = S_approx_owned_.get();
+    pending_s_approx.reset(BuildSchurDiagApprox_(*A11, *A12, *A21, *A22));
+    next_s_approx = pending_s_approx.get();
   } else if (*approx_type_ == SchurApproxType::A22Only) {
     auto* A22 = dynamic_cast<const mfem::HypreParMatrix*>(&A22_op);
 
     MFEM_VERIFY(A22, "A22 block must be a HypreParMatrix for A22Only Schur complement preconditioner.");
 
-    S_approx_owned_.reset(new mfem::HypreParMatrix(*A22));
-    S_approx_view_ = S_approx_owned_.get();
-  } else if (*approx_type_ == SchurApproxType::CustomAction) {
-    S_approx_owned_.reset();
-    auto* action_solver = dynamic_cast<SchurComplementActionSolver*>(mfem_solvers_[1].get());
-    MFEM_VERIFY(action_solver, "SchurApproxType::CustomAction requires a SchurComplementActionSolver for block 1");
-    action_solver->setBlockContext(*block_jacobian_, block_offsets_);
+    pending_s_approx.reset(new mfem::HypreParMatrix(*A22));
+    next_s_approx = pending_s_approx.get();
   }
 
-  if (!approx_type_ || *approx_type_ != SchurApproxType::CustomAction) {
-    MFEM_VERIFY(S_approx_view_, "Schur complement approximation operator must be set");
+  if (!schur_action_) {
+    MFEM_VERIFY(next_s_approx, "Schur complement approximation operator must be set");
 
     // Set the Schur complement preconditioner for block (1,1)
-    mfem_solvers_[1]->SetOperator(*S_approx_view_);
+    mfem_solvers_[1]->SetOperator(*next_s_approx);
+    if (!approx_type_) {
+      block_op_providers_[1]->notifyOperatorSet();
+    } else {
+      S_approx_owned_ = std::move(pending_s_approx);
+    }
+    S_approx_view_ = next_s_approx;
   }
   mfem_solvers_[1]->iterative_mode = false;
 
@@ -609,5 +666,9 @@ void BlockSchurPreconditioner::SetOperator(const mfem::Operator& jacobian)
   solver_diag_->SetBlock(1, 1, mfem_solvers_[1].get());
 }
 
-BlockSchurPreconditioner::~BlockSchurPreconditioner() {}
+BlockSchurPreconditioner::~BlockSchurPreconditioner()
+{
+  solver_diag_.reset();
+  mfem_solvers_.clear();
+}
 }  // namespace smith

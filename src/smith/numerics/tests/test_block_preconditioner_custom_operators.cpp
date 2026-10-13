@@ -287,23 +287,80 @@ class OperatorDiagonalSolver : public mfem::Solver {
   mfem::Vector diag_;
 };
 
+class LifetimeTrackedOperator : public mfem::Operator {
+ public:
+  LifetimeTrackedOperator(int size, std::shared_ptr<bool> alive) : mfem::Operator(size), alive_(std::move(alive))
+  {
+    *alive_ = true;
+  }
+
+  ~LifetimeTrackedOperator() override { *alive_ = false; }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+  std::shared_ptr<bool> alive() const { return alive_; }
+
+ private:
+  std::shared_ptr<bool> alive_;
+};
+
+class OperatorLifetimeCheckingSolver : public mfem::Solver {
+ public:
+  explicit OperatorLifetimeCheckingSolver(std::shared_ptr<bool> lifetime_ok) : lifetime_ok_(std::move(lifetime_ok)) {}
+
+  ~OperatorLifetimeCheckingSolver() override { checkCurrentOperatorLifetime(); }
+
+  void SetOperator(const mfem::Operator& op) override
+  {
+    checkCurrentOperatorLifetime();
+    const auto* tracked_op = dynamic_cast<const LifetimeTrackedOperator*>(&op);
+    MFEM_VERIFY(tracked_op, "OperatorLifetimeCheckingSolver requires LifetimeTrackedOperator");
+    current_operator_alive_ = tracked_op->alive();
+    height = op.Height();
+    width = op.Width();
+  }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+ private:
+  void checkCurrentOperatorLifetime() const
+  {
+    if (current_operator_alive_ && !*current_operator_alive_) {
+      *lifetime_ok_ = false;
+    }
+  }
+
+  std::shared_ptr<bool> lifetime_ok_;
+  std::shared_ptr<bool> current_operator_alive_;
+};
+
 class MockSchurActionSolver : public smith::SchurComplementActionSolver {
  public:
-  MockSchurActionSolver(double scale, std::shared_ptr<int> context_calls, std::shared_ptr<int> update_calls)
-      : scale_(scale), context_calls_(std::move(context_calls)), update_calls_(std::move(update_calls))
+  MockSchurActionSolver(double scale, std::shared_ptr<int> context_calls, std::shared_ptr<int> update_calls,
+                        std::shared_ptr<std::vector<int>> update_order, std::shared_ptr<double> updated_state,
+                        std::shared_ptr<int> context_block_size)
+      : scale_(scale),
+        context_calls_(std::move(context_calls)),
+        update_calls_(std::move(update_calls)),
+        update_order_(std::move(update_order)),
+        updated_state_(std::move(updated_state)),
+        context_block_size_(std::move(context_block_size))
   {
   }
 
-  void setBlockContext(const mfem::BlockOperator& jacobian, const mfem::Array<int>& block_offsets) override
+  void setBlockContext(const mfem::BlockOperator& jacobian) override
   {
-    smith::SchurComplementActionSolver::setBlockContext(jacobian, block_offsets);
+    smith::SchurComplementActionSolver::setBlockContext(jacobian);
     ++(*context_calls_);
+    update_order_->push_back(2);
+    *context_block_size_ = block_offsets_[2] - block_offsets_[1];
   }
 
-  void updateForState([[maybe_unused]] const mfem::Vector& state,
-                      [[maybe_unused]] const mfem::Array<int>& block_offsets) override
+  void updateForState(const mfem::Vector& state, const mfem::Array<int>& block_offsets) override
   {
     ++(*update_calls_);
+    update_order_->push_back(1);
+    *updated_state_ = state[block_offsets[1]];
   }
 
   void Mult(const mfem::Vector& x, mfem::Vector& y) const override
@@ -317,6 +374,9 @@ class MockSchurActionSolver : public smith::SchurComplementActionSolver {
   double scale_;
   std::shared_ptr<int> context_calls_;
   std::shared_ptr<int> update_calls_;
+  std::shared_ptr<std::vector<int>> update_order_;
+  std::shared_ptr<double> updated_state_;
+  std::shared_ptr<int> context_block_size_;
 };
 
 }  // namespace
@@ -603,9 +663,9 @@ TEST(BlockSchurPreconditionerCustom, FullWithExactSchurOperatorIsExactInverse)
   solvers.push_back(std::make_unique<Exact2x2Solver>());
   solvers.push_back(std::make_unique<Exact2x2Solver>());
 
-  auto schur_override =
+  auto schur_provider =
       smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
-  smith::SchurOperator schur(std::move(schur_override.provider));
+  smith::SchurOperator schur(std::move(schur_provider.provider));
 
   smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Full, std::move(schur));
   P.SetOperator(A);
@@ -716,9 +776,9 @@ TEST(BlockSchurPreconditionerCustom, CustomOverrideNotConsumedOnRepeatedSetOpera
   std::vector<OwnedHypreParMatrix> override_mats;
   override_mats.push_back(makeHypreScaledIdentity(n, 7.0));
 
-  auto schur_override =
+  auto schur_provider =
       smith::makeFixedBlockProviderOverride(1, std::unique_ptr<const mfem::Operator>(std::move(override_mats[0].A)));
-  smith::SchurOperator schur(std::move(schur_override.provider));
+  smith::SchurOperator schur(std::move(schur_provider.provider));
 
   smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 
@@ -755,13 +815,13 @@ TEST(BlockSchurPreconditionerCustom, StateDependentProviderUpdatesSchurSolve)
   solvers.push_back(std::make_unique<OperatorDiagonalSolver>());
 
   auto update_count = std::make_shared<int>(0);
-  auto schur_override = smith::makeStateDependentBlockProviderOverride(
+  auto schur_provider = smith::makeStateDependentBlockProviderOverride(
       1, [update_count](const mfem::Vector& state, const mfem::Array<int>& block_offsets) {
         ++(*update_count);
         const int block_size = block_offsets[2] - block_offsets[1];
         return makeMutableLocalScaledIdentityOp(block_size, state[block_offsets[1]]);
       });
-  smith::SchurOperator schur(std::move(schur_override.provider));
+  smith::SchurOperator schur(std::move(schur_provider.provider));
 
   smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 
@@ -792,8 +852,75 @@ TEST(BlockSchurPreconditionerCustom, StateDependentProviderUpdatesSchurSolve)
   EXPECT_NEAR(x[3], b[3] / 7.0, 1e-12);
 }
 
-// Verifies custom Schur action solvers can replace explicit Schur operators.
-TEST(BlockSchurPreconditionerCustom, CustomActionUsesActionSolverWithoutSchurOperatorProvider)
+TEST(BlockSchurPreconditionerCustom, FailedProviderUpdatePreservesCurrentOperator)
+{
+  constexpr int n = 2;
+  Array<int> offsets({0, n});
+  Vector state(n);
+  state = 0.0;
+
+  auto provider = smith::makeStateDependentBlockProviderOverride(
+      0, [](const mfem::Vector&, const mfem::Array<int>&) { return std::unique_ptr<mfem::Operator>(); },
+      makeMutableLocalScaledIdentityOp(n, 3.0));
+  const auto* initial_operator = &provider.provider->currentOperator();
+
+  EXPECT_THROW(provider.provider->updateForState(state, offsets), std::invalid_argument);
+  EXPECT_EQ(&provider.provider->currentOperator(), initial_operator);
+}
+
+TEST(BlockSchurPreconditionerCustom, ProviderOperatorOutlivesAttachedSolverReference)
+{
+  constexpr int n = 2;
+  Array<int> offsets({0, n, 2 * n});
+
+  auto A11o = makeHypreScaledIdentity(n, 2.0);
+  auto A12o = makeHypreScaledIdentity(n, 0.0);
+  auto A21o = makeHypreScaledIdentity(n, 0.0);
+  auto A22o = makeHypreScaledIdentity(n, 3.0);
+
+  BlockOperator A(offsets);
+  A.SetBlock(0, 0, A11o.A.get());
+  A.SetBlock(0, 1, A12o.A.get());
+  A.SetBlock(1, 0, A21o.A.get());
+  A.SetBlock(1, 1, A22o.A.get());
+
+  auto initial_operator_alive = std::make_shared<bool>(false);
+  auto updated_operator_alive = std::make_shared<bool>(false);
+  auto lifetime_ok = std::make_shared<bool>(true);
+
+  {
+    std::vector<std::unique_ptr<Solver>> solvers;
+    solvers.push_back(std::make_unique<IdentitySolver>());
+    solvers.push_back(std::make_unique<OperatorLifetimeCheckingSolver>(lifetime_ok));
+
+    auto provider = smith::makeStateDependentBlockProviderOverride(
+        1,
+        [updated_operator_alive, n](const mfem::Vector&, const mfem::Array<int>&) {
+          return std::make_unique<LifetimeTrackedOperator>(n, updated_operator_alive);
+        },
+        std::make_unique<LifetimeTrackedOperator>(n, initial_operator_alive));
+    smith::SchurOperator schur(std::move(provider.provider));
+    smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
+
+    P.SetOperator(A);
+
+    Vector state(2 * n);
+    state = 0.0;
+    P.updateForState(state, offsets);
+    EXPECT_TRUE(*initial_operator_alive);
+    EXPECT_TRUE(*updated_operator_alive);
+
+    P.SetOperator(A);
+    EXPECT_FALSE(*initial_operator_alive);
+    EXPECT_TRUE(*updated_operator_alive);
+  }
+
+  EXPECT_TRUE(*lifetime_ok);
+  EXPECT_FALSE(*updated_operator_alive);
+}
+
+// Verifies direct Schur inverse actions receive the state and current block context.
+TEST(BlockSchurPreconditionerCustom, DirectInverseActionReceivesStateAndBlockContext)
 {
   constexpr int n = 2;
   Array<int> offsets({0, n, 2 * n});
@@ -811,16 +938,20 @@ TEST(BlockSchurPreconditionerCustom, CustomActionUsesActionSolverWithoutSchurOpe
 
   auto context_calls = std::make_shared<int>(0);
   auto update_calls = std::make_shared<int>(0);
+  auto update_order = std::make_shared<std::vector<int>>();
+  auto updated_state = std::make_shared<double>(0.0);
+  auto context_block_size = std::make_shared<int>(0);
 
   std::vector<std::unique_ptr<Solver>> solvers;
   solvers.push_back(std::make_unique<IdentitySolver>());
-  solvers.push_back(std::make_unique<MockSchurActionSolver>(0.25, context_calls, update_calls));
+  auto schur = std::make_unique<MockSchurActionSolver>(0.25, context_calls, update_calls, update_order, updated_state,
+                                                       context_block_size);
 
-  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal,
-                                    smith::SchurApproxType::CustomAction);
+  smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
 
   Vector state(2 * n);
   state = 0.0;
+  state[offsets[1]] = 9.0;
   P.updateForState(state, offsets);
   P.SetOperator(A);
 
@@ -830,6 +961,9 @@ TEST(BlockSchurPreconditionerCustom, CustomActionUsesActionSolverWithoutSchurOpe
 
   EXPECT_EQ(*update_calls, 1);
   EXPECT_EQ(*context_calls, 1);
+  EXPECT_EQ(*updated_state, 9.0);
+  EXPECT_EQ(*context_block_size, n);
+  EXPECT_EQ(*update_order, (std::vector<int>{1, 2}));
   EXPECT_NEAR(x[0], b[0], 1e-12);
   EXPECT_NEAR(x[1], b[1], 1e-12);
   EXPECT_NEAR(x[2], 0.25 * b[2], 1e-12);

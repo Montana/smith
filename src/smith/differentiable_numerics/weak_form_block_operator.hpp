@@ -115,6 +115,9 @@ BlockProviderOverride makeStateDependentWeakFormBlockProviderOverride(
  * from block 1 of the current nonlinear state. Essential dofs are copied from
  * @a bc_manager when it is non-null.
  *
+ * @note @a weak_form must outlive the returned operator and every preconditioner
+ *       to which that operator is supplied.
+ *
  * @param weak_form Weak form whose Jacobian approximates the Schur complement.
  * @param shape_disp Mesh shape displacement used to assemble the weak form.
  * @param schur_field Field updated from the Schur block at each nonlinear iterate.
