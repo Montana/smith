@@ -287,6 +287,53 @@ class OperatorDiagonalSolver : public mfem::Solver {
   mfem::Vector diag_;
 };
 
+class LifetimeTrackedOperator : public mfem::Operator {
+ public:
+  LifetimeTrackedOperator(int size, std::shared_ptr<bool> alive) : mfem::Operator(size), alive_(std::move(alive))
+  {
+    *alive_ = true;
+  }
+
+  ~LifetimeTrackedOperator() override { *alive_ = false; }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+  std::shared_ptr<bool> alive() const { return alive_; }
+
+ private:
+  std::shared_ptr<bool> alive_;
+};
+
+class OperatorLifetimeCheckingSolver : public mfem::Solver {
+ public:
+  explicit OperatorLifetimeCheckingSolver(std::shared_ptr<bool> lifetime_ok) : lifetime_ok_(std::move(lifetime_ok)) {}
+
+  ~OperatorLifetimeCheckingSolver() override { checkCurrentOperatorLifetime(); }
+
+  void SetOperator(const mfem::Operator& op) override
+  {
+    checkCurrentOperatorLifetime();
+    const auto* tracked_op = dynamic_cast<const LifetimeTrackedOperator*>(&op);
+    MFEM_VERIFY(tracked_op, "OperatorLifetimeCheckingSolver requires LifetimeTrackedOperator");
+    current_operator_alive_ = tracked_op->alive();
+    height = op.Height();
+    width = op.Width();
+  }
+
+  void Mult(const mfem::Vector& x, mfem::Vector& y) const override { y = x; }
+
+ private:
+  void checkCurrentOperatorLifetime() const
+  {
+    if (current_operator_alive_ && !*current_operator_alive_) {
+      *lifetime_ok_ = false;
+    }
+  }
+
+  std::shared_ptr<bool> lifetime_ok_;
+  std::shared_ptr<bool> current_operator_alive_;
+};
+
 }  // namespace
 /* ============================================================
    Tests
@@ -758,6 +805,73 @@ TEST(BlockSchurPreconditionerCustom, StateDependentProviderUpdatesSchurSolve)
   EXPECT_NEAR(x[1], b[1] / 2.0, 1e-12);
   EXPECT_NEAR(x[2], b[2] / 7.0, 1e-12);
   EXPECT_NEAR(x[3], b[3] / 7.0, 1e-12);
+}
+
+TEST(BlockSchurPreconditionerCustom, FailedProviderUpdatePreservesCurrentOperator)
+{
+  constexpr int n = 2;
+  Array<int> offsets({0, n});
+  Vector state(n);
+  state = 0.0;
+
+  auto provider = smith::makeStateDependentBlockProviderOverride(
+      0, [](const mfem::Vector&, const mfem::Array<int>&) { return std::unique_ptr<mfem::Operator>(); },
+      makeMutableLocalScaledIdentityOp(n, 3.0));
+  const auto* initial_operator = &provider.provider->currentOperator();
+
+  EXPECT_THROW(provider.provider->updateForState(state, offsets), std::invalid_argument);
+  EXPECT_EQ(&provider.provider->currentOperator(), initial_operator);
+}
+
+TEST(BlockSchurPreconditionerCustom, ProviderOperatorOutlivesAttachedSolverReference)
+{
+  constexpr int n = 2;
+  Array<int> offsets({0, n, 2 * n});
+
+  auto A11o = makeHypreScaledIdentity(n, 2.0);
+  auto A12o = makeHypreScaledIdentity(n, 0.0);
+  auto A21o = makeHypreScaledIdentity(n, 0.0);
+  auto A22o = makeHypreScaledIdentity(n, 3.0);
+
+  BlockOperator A(offsets);
+  A.SetBlock(0, 0, A11o.A.get());
+  A.SetBlock(0, 1, A12o.A.get());
+  A.SetBlock(1, 0, A21o.A.get());
+  A.SetBlock(1, 1, A22o.A.get());
+
+  auto initial_operator_alive = std::make_shared<bool>(false);
+  auto updated_operator_alive = std::make_shared<bool>(false);
+  auto lifetime_ok = std::make_shared<bool>(true);
+
+  {
+    std::vector<std::unique_ptr<Solver>> solvers;
+    solvers.push_back(std::make_unique<IdentitySolver>());
+    solvers.push_back(std::make_unique<OperatorLifetimeCheckingSolver>(lifetime_ok));
+
+    auto provider = smith::makeStateDependentBlockProviderOverride(
+        1,
+        [updated_operator_alive, n](const mfem::Vector&, const mfem::Array<int>&) {
+          return std::make_unique<LifetimeTrackedOperator>(n, updated_operator_alive);
+        },
+        std::make_unique<LifetimeTrackedOperator>(n, initial_operator_alive));
+    smith::SchurOperator schur(std::move(provider.provider));
+    smith::BlockSchurPreconditioner P(std::move(solvers), smith::BlockSchurType::Diagonal, std::move(schur));
+
+    P.SetOperator(A);
+
+    Vector state(2 * n);
+    state = 0.0;
+    P.updateForState(state, offsets);
+    EXPECT_TRUE(*initial_operator_alive);
+    EXPECT_TRUE(*updated_operator_alive);
+
+    P.SetOperator(A);
+    EXPECT_FALSE(*initial_operator_alive);
+    EXPECT_TRUE(*updated_operator_alive);
+  }
+
+  EXPECT_TRUE(*lifetime_ok);
+  EXPECT_FALSE(*updated_operator_alive);
 }
 
 TEST(BlockDiagonalPreconditionerCustom, ThrowsOnOutOfRangeOverrideIndex)

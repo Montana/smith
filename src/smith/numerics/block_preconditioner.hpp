@@ -32,6 +32,14 @@ class BlockOperatorProvider {
    * @brief Return the current concrete operator.
    */
   virtual const mfem::Operator& currentOperator() const = 0;
+
+  /**
+   * @brief Notify the provider that currentOperator() was installed on its solver.
+   *
+   * State-dependent providers use this notification to retain the previously
+   * installed operator until the solver has been rebound successfully.
+   */
+  virtual void notifyOperatorSet() {}
 };
 
 /**
