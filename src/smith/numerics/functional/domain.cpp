@@ -836,11 +836,10 @@ Domain operator|(const Domain& a, const Domain& b) { return set_operation(SET_OP
 Domain operator&(const Domain& a, const Domain& b) { return set_operation(SET_OPERATION::INTERSECTION, a, b); }
 Domain operator-(const Domain& a, const Domain& b) { return set_operation(SET_OPERATION::DIFFERENCE, a, b); }
 
-
 /// @brief helper function to make a domain from attribute set for body elements
-/// for a specific mesh dimension 
+/// for a specific mesh dimension
 /// @tparam d the dimension of the mesh
-/// 
+///
 /// @param mesh the mfem mesh
 /// @param attribute_set_name the name to search for, and to give to the
 ///   created domain
@@ -889,9 +888,9 @@ Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribut
 }
 
 /// @brief helper function to make a domain from attribute set for boundary elements
-/// for a specific mesh dimension 
+/// for a specific mesh dimension
 /// @tparam d the dimension of the mesh
-/// 
+///
 /// @param mesh the mfem mesh
 /// @param attribute_set_name the name to search for, and to give to the
 ///   created domain
