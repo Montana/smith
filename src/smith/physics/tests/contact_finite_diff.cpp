@@ -6,7 +6,11 @@
 
 #include "smith/physics/solid_mechanics_contact.hpp"
 
+#include <algorithm>
+#include <array>
 #include <csignal>
+#include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <iomanip>
 #include <set>
@@ -33,6 +37,85 @@
 #include "smith/physics/materials/solid_material.hpp"
 #include "smith/infrastructure/application_manager.hpp"
 #include "tribol/interface/tribol.hpp"
+
+namespace {
+
+constexpr std::size_t MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE = 16;
+constexpr std::size_t MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE = 384;
+
+std::array<std::array<char, MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE>, MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE>
+    mpi_alltoallv_diagnostic_messages{};
+volatile std::sig_atomic_t mpi_alltoallv_diagnostic_lengths[MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE]{};
+volatile std::sig_atomic_t mpi_alltoallv_diagnostic_sequence = 0;
+
+void recordMpiAlltoallvDiagnostic(const void* send_buffer, const int* send_counts, const int* send_displacements,
+                                  MPI_Datatype send_datatype, void* receive_buffer, const int* receive_counts,
+                                  const int* receive_displacements, MPI_Datatype receive_datatype,
+                                  MPI_Comm communicator)
+{
+  int rank = -1;
+  int communicator_size = -1;
+  int send_datatype_size = -1;
+  int receive_datatype_size = -1;
+  (void)PMPI_Comm_rank(communicator, &rank);
+  (void)PMPI_Comm_size(communicator, &communicator_size);
+  (void)PMPI_Type_size(send_datatype, &send_datatype_size);
+  (void)PMPI_Type_size(receive_datatype, &receive_datatype_size);
+
+  long long total_send_count = 0;
+  long long total_receive_count = 0;
+  for (int index = 0; index < communicator_size; ++index) {
+    total_send_count += send_counts[index];
+    total_receive_count += receive_counts[index];
+  }
+
+  const int self_send_count = rank >= 0 ? send_counts[rank] : -1;
+  const int self_receive_count = rank >= 0 ? receive_counts[rank] : -1;
+  const int self_send_displacement = rank >= 0 ? send_displacements[rank] : -1;
+  const int self_receive_displacement = rank >= 0 ? receive_displacements[rank] : -1;
+  const std::sig_atomic_t sequence = mpi_alltoallv_diagnostic_sequence;
+  mpi_alltoallv_diagnostic_sequence = sequence + 1;
+  const std::size_t slot = static_cast<std::size_t>(sequence) % MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE;
+  mpi_alltoallv_diagnostic_lengths[slot] = 0;
+  auto& message = mpi_alltoallv_diagnostic_messages[slot];
+  const int length = std::snprintf(
+      message.data(), message.size(),
+      "MPI_Alltoallv snapshot seq=%d rank=%d/%d send_total=%lld receive_total=%lld self_send=%d self_receive=%d "
+      "self_send_displacement=%d self_receive_displacement=%d send_datatype_size=%d receive_datatype_size=%d "
+      "send_buffer=%p receive_buffer=%p\n",
+      static_cast<int>(sequence), rank, communicator_size, total_send_count, total_receive_count, self_send_count,
+      self_receive_count, self_send_displacement, self_receive_displacement, send_datatype_size,
+      receive_datatype_size, const_cast<void*>(send_buffer), receive_buffer);
+  if (length > 0) {
+    mpi_alltoallv_diagnostic_lengths[slot] = static_cast<std::sig_atomic_t>(
+        std::min(length, static_cast<int>(MPI_ALLTOALLV_DIAGNOSTIC_MESSAGE_SIZE - 1)));
+  }
+}
+
+void writeMpiAlltoallvDiagnosticSnapshots(int file_descriptor)
+{
+  static constexpr char header[] = "Recent MPI_Alltoallv snapshots:\n";
+  (void)::write(file_descriptor, header, sizeof(header) - 1);
+  for (std::size_t slot = 0; slot < MPI_ALLTOALLV_DIAGNOSTIC_HISTORY_SIZE; ++slot) {
+    const std::sig_atomic_t length = mpi_alltoallv_diagnostic_lengths[slot];
+    if (length > 0) {
+      (void)::write(file_descriptor, mpi_alltoallv_diagnostic_messages[slot].data(), static_cast<std::size_t>(length));
+    }
+  }
+}
+
+}  // namespace
+
+extern "C" int MPI_Alltoallv(const void* send_buffer, const int* send_counts, const int* send_displacements,
+                             MPI_Datatype send_datatype, void* receive_buffer, const int* receive_counts,
+                             const int* receive_displacements, MPI_Datatype receive_datatype,
+                             MPI_Comm communicator)
+{
+  recordMpiAlltoallvDiagnostic(send_buffer, send_counts, send_displacements, send_datatype, receive_buffer,
+                               receive_counts, receive_displacements, receive_datatype, communicator);
+  return PMPI_Alltoallv(send_buffer, send_counts, send_displacements, send_datatype, receive_buffer, receive_counts,
+                        receive_displacements, receive_datatype, communicator);
+}
 
 namespace smith {
 
@@ -75,6 +158,7 @@ void contactFiniteDiffWatchdogHandler(int)
 #ifdef MFEM_USE_STRUMPACK
   writeStrumpackDiagnosticSnapshots(STDERR_FILENO);
 #endif
+  writeMpiAlltoallvDiagnosticSnapshots(STDERR_FILENO);
 
   void* call_stack[64];
   int frame_count = ::backtrace(call_stack, 64);
