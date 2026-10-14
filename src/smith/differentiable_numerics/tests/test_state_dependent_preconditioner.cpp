@@ -119,8 +119,8 @@ TEST(StateDependentPreconditioner, UpdatesProviderCurrentOperatorFromNonlinearSt
   sub_solvers.push_back(std::make_unique<IdentitySolver>());
   sub_solvers.push_back(std::make_unique<IdentitySolver>());
 
-  auto preconditioner = std::make_unique<BlockSchurPreconditioner>(
-      std::move(sub_solvers), BlockSchurType::Diagonal, std::move(schur));
+  auto preconditioner =
+      std::make_unique<BlockSchurPreconditioner>(std::move(sub_solvers), BlockSchurType::Diagonal, std::move(schur));
 
   NonlinearSolverOptions nonlin_opts;
   nonlin_opts.nonlin_solver = NonlinearSolver::Newton;
