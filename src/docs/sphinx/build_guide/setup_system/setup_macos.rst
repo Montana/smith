@@ -18,7 +18,7 @@ To start, install the following packages using Homebrew.
 
 .. code-block:: bash
 
-   $ brew install autoconf automake bzip2 clingo cmake diffutils fmt gcc gettext gnu-sed graphviz hwloc lapack libx11 llvm@19 m4 make ninja open-mpi openblas pkg-config readline zlib
+   $ brew install autoconf automake bzip2 clingo cmake diffutils fmt gcc gettext gnu-sed graphviz hwloc lapack libomp libx11 llvm@19 m4 make ninja open-mpi openblas pkg-config readline zlib
 
 If you plan to install the developer tools, you should also run:
 
@@ -45,9 +45,25 @@ This is also useful for a few additional packages:
 
     We provide a basic MacOS Spack environment file that
     may work for most people. If you want to try using that, skip to :ref:`build_tpls-label`
-    below and use this command line option instead ``--spack-env-file=scripts/spack/configs/darwin/spack.yaml``. You will likely
+    below and use this command line option instead ``--spack-env-file=scripts/spack/configs/macos_sonoma_aarch64/spack.yaml``. You will likely
     need to update the versions of packages to match the versions installed by Homebrew. The versions for all installed packages can be listed via
     the command ``brew list --versions``.
+
+Homebrew installs LLVM's OpenMP runtime in the separate ``libomp`` package.
+The provided Apple Silicon Spack configuration adds its header and library paths
+to the external LLVM compiler's ``extra_attributes.environment.prepend_path``
+entries for ``CPATH`` and ``LIBRARY_PATH``. These paths are needed during CMake's
+verbose OpenMP detection and PETSc's configuration, including probes that bypass
+Spack's normal compiler flag injection. The compiler's ``cflags``, ``cxxflags``,
+and ``ldflags`` entries also include these paths and a runtime library search path
+so generated CMake host-configs work outside the Spack build environment.
+
+For Intel Macs or a custom Homebrew prefix, update all ``libomp`` paths in your
+Spack configuration using the directory printed by ``brew --prefix libomp``.
+If you have already concretized an environment with different compiler settings,
+use a fresh environment with ``concretizer: {reuse: false}`` when generating the
+new dependency specification. This prevents reuse of old external compiler
+metadata that omits the OpenMP paths.
 
 Optionally, you can install the developer tools via ``pip``. This step is only required if you wish to use Smith's developer tools.
 In order to use Python devtools, you will need to create a Python venv. This is much more reliable than having Spack install 20+ Python packages.
