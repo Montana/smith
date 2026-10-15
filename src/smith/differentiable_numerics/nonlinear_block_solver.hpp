@@ -52,9 +52,14 @@ class NonlinearBlockSolverBase {
 
   /// @brief Solve a set of equations with a vector of FiniteElementState as unknown
   /// @param u_guesses initial guess for solver
-  /// @param residuals std::vector<std::function> for equations to be solved
-  /// @param jacobians std::vector<std::vector>> of std::function for evaluating the linearized Jacobians about the
-  /// current solution
+  /// @param residuals std::function for equations to be solved:
+  ///   takes the std::vector of field pointers for each unknown block
+  ///   and returns a std::vector of mfem::Vectors corresponding to each residual block
+  /// @param jacobians std::function that makes the block jacobian
+  ///   takes the std::vector of field pointers for each unknown block 
+  ///   returns a std::vector<std::vector>> of std::unique_ptr<mfem::HypreParMatrix>
+  ///   that represents the linearized Jacobians about the current solution
+  ///   for each block in the block jacobian matrix
   /// @return std::vector of solution vectors (FiniteElementState)
   virtual std::vector<FieldPtr> solve(
       const std::vector<FieldPtr>& u_guesses,
