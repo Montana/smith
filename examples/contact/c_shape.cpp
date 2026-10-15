@@ -164,9 +164,9 @@ int main(int argc, char* argv[])
     tribol::setBinningProximityScale(interaction_id, binning_proximity_scale);
     tribol::setResidualGap(interaction_id, residual_gap);
     tribol::setEnforcementLocation(interaction_id, tribol::EnforcementLocation::QuadraturePoint);
-    tribol::setEnergyMortarNormalSmoothingStartAngle(interaction_id, normal_smoothing_start_angle);
-    tribol::setEnergyMortarResidualGapRampAngle(interaction_id, residual_gap_ramp_angle);
-    tribol::setEnergyMortarResidualGapRampUpdates(interaction_id, update_residual_gap_ramp);
+    tribol::setNormalSmoothingStartAngle(interaction_id, normal_smoothing_start_angle);
+    tribol::setResidualGapRampAngle(interaction_id, residual_gap_ramp_angle);
+    tribol::setResidualGapRampUpdates(interaction_id, update_residual_gap_ramp);
   };
 
   if (all_boundary_self_contact) {
