@@ -845,7 +845,7 @@ Domain operator-(const Domain& a, const Domain& b) { return set_operation(SET_OP
 /// @param attribute_set_name the name to search for
 /// @return a smith::Domain corresponding to the attribute set name
 template <int d>
-Domain from_body_element_attribute_set(const mesh_t& mesh, std::string_view attribute_set_name)
+Domain from_element_attribute_set(const mesh_t& mesh, std::string_view attribute_set_name)
 {
   assert(mesh.SpaceDimension() == d);
   // attribute sets for body elements
@@ -872,13 +872,13 @@ Domain from_body_element_attribute_set(const mesh_t& mesh, std::string_view attr
   }
 }
 
-Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name)
+Domain fromElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name)
 {
   switch (mesh.SpaceDimension()) {
     case 2:
-      return from_body_element_attribute_set<2>(mesh, attribute_set_name);
+      return from_element_attribute_set<2>(mesh, attribute_set_name);
     case 3:
-      return from_body_element_attribute_set<3>(mesh, attribute_set_name);
+      return from_element_attribute_set<3>(mesh, attribute_set_name);
     default:
       SLIC_ERROR("Invalid spatial dimension. Domains may only be created on 2D or 3D meshes.");
       return smith::Domain{mesh, mesh.Dimension(), smith::Domain::Type::Elements};

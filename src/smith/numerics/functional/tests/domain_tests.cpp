@@ -530,7 +530,7 @@ TEST(domain, fromBodyElementAttributeSet)
   auto meshInput = buildMeshFromFile(SMITH_REPO_DIR "/mfem/data/compass.msh");
   auto mesh = smith::mesh::refineAndDistribute(std::move(meshInput), 0, 0);
 
-  Domain d_n_even = fromBodyElementAttributeSet(*mesh, "N Even");
+  Domain d_n_even = fromElementAttributeSet(*mesh, "N Even");
   EXPECT_EQ(d_n_even.tri_ids_.size(), 1);
 
   auto find_element_n_even = [](std::vector<vec2> vertices, int /* attr */) {

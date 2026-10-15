@@ -317,7 +317,7 @@ inline auto by_attr(std::set<int> values)
 /// @param mesh the mfem mesh
 /// @param attribute_set_name the name to search for
 /// @return a smith::Domain corresponding to the attribute set name
-smith::Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name);
+smith::Domain fromElementAttributeSet(const mesh_t& mesh, std::string_view attribute_set_name);
 
 /// @brief Import a domain from the attribute set of the mfem mesh.
 /// Search attributes of boundary elements.
