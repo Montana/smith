@@ -128,14 +128,18 @@ if (NOT SMITH_THIRD_PARTY_LIBRARIES_FOUND)
     #------------------------------------------------------------------------------
     # Conduit (found via Axom)
     #------------------------------------------------------------------------------
-    if(NOT CONDUIT_DIR)
+    if(CONDUIT_DIR)
+        set(CONDUIT_FOUND TRUE)
+    else()
         MESSAGE(FATAL_ERROR "Could not find Conduit. Conduit requires explicit CONDUIT_DIR.")
     endif()
 
     #------------------------------------------------------------------------------
     # HDF5 (found via Axom)
     #------------------------------------------------------------------------------
-    if (NOT HDF5_DIR)
+    if (HDF5_DIR)
+        set(HDF5_FOUND TRUE)
+    else()
         MESSAGE(FATAL_ERROR "Could not find HDF5. HDF5 requires explicit HDF5_DIR.")
     endif()
 
@@ -657,12 +661,11 @@ if (NOT SMITH_THIRD_PARTY_LIBRARIES_FOUND)
 
 
     #---------------------------------------------------------------------------
-    # Remove non-existant INTERFACE_INCLUDE_DIRECTORIES from imported targets
+    # Remove non-existent INTERFACE_INCLUDE_DIRECTORIES from imported targets
     # to work around CMake error
     #---------------------------------------------------------------------------
     set(_imported_targets
         axom
-        axom::mfem
         conduit
         conduit::conduit_mpi
         conduit::conduit
@@ -670,8 +673,7 @@ if (NOT SMITH_THIRD_PARTY_LIBRARIES_FOUND)
         conduit_relay_mpi_io
         conduit_blueprint
         conduit_blueprint_mpi
-        mfem
-        tribol::mfem)
+        mfem)
 
     foreach(_target ${_imported_targets})
         if(TARGET ${_target})
@@ -697,9 +699,7 @@ if (NOT SMITH_THIRD_PARTY_LIBRARIES_FOUND)
     # the correct MPI lib directory. This guards against that.
     # https://github.com/spack/spack/issues/24685
     set(_mfem_targets
-        mfem
-        axom::mfem
-        tribol::mfem)
+        mfem)
     if(STRUMPACK_FOUND)
         list(GET MPI_C_LIBRARIES 0 _first_mpi_lib)
         get_filename_component(_mpi_lib_dir ${_first_mpi_lib} DIRECTORY)
