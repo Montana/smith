@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <tuple>
+#include <format>
 
 #include "smith/numerics/functional/element_restriction.hpp"
 
@@ -602,7 +603,7 @@ Domain EntireDomain(const mesh_t& mesh)
       return Domain::ofElements(mesh, [](std::vector<vec3>, int) { return true; });
       break;
     default:
-      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      SLIC_ERROR("Invalid spatial dimension. Domains may only be created on 2D or 3D meshes.");
       exit(-1);
   }
 }
@@ -617,7 +618,7 @@ Domain EntireBoundary(const mesh_t& mesh)
       return Domain::ofBoundaryElements(mesh, [](std::vector<vec3>, int) { return true; });
       break;
     default:
-      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      SLIC_ERROR("Invalid spatial dimension. Domains may only be created on 2D or 3D meshes.");
       exit(-1);
   }
 }
@@ -841,8 +842,7 @@ Domain operator-(const Domain& a, const Domain& b) { return set_operation(SET_OP
 /// @tparam d the dimension of the mesh
 ///
 /// @param mesh the mfem mesh
-/// @param attribute_set_name the name to search for, and to give to the
-///   created domain
+/// @param attribute_set_name the name to search for
 /// @return a smith::Domain corresponding to the attribute set name
 template <int d>
 Domain from_body_element_attribute_set(const mesh_t& mesh, std::string_view attribute_set_name)
@@ -859,9 +859,7 @@ Domain from_body_element_attribute_set(const mesh_t& mesh, std::string_view attr
     auto& attr_list = el_attr_sets.GetAttributeSet(set_name_str);
 
     // predicate for domain from the attribute list
-    auto by_attr_list = [&attr_list](std::vector<tensor<double, d>>, int attr) {
-      return std::ranges::find(attr_list, attr) != attr_list.end();
-    };
+    auto by_attr_list = [&attr_list](std::vector<tensor<double, d>>, int attr) { return attr_list.Find(attr) != -1; };
 
     auto domain = smith::Domain::ofElements(mesh, by_attr_list);
     return domain;
@@ -882,7 +880,7 @@ Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribut
     case 3:
       return from_body_element_attribute_set<3>(mesh, attribute_set_name);
     default:
-      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      SLIC_ERROR("Invalid spatial dimension. Domains may only be created on 2D or 3D meshes.");
       return smith::Domain{mesh, mesh.Dimension(), smith::Domain::Type::Elements};
   }
 }
@@ -892,8 +890,7 @@ Domain fromBodyElementAttributeSet(const mesh_t& mesh, std::string_view attribut
 /// @tparam d the dimension of the mesh
 ///
 /// @param mesh the mfem mesh
-/// @param attribute_set_name the name to search for, and to give to the
-///   created domain
+/// @param attribute_set_name the name to search for
 /// @return a smith::Domain corresponding to the attribute set name
 template <int d>
 Domain from_boundary_element_attribute_set(const mesh_t& mesh, std::string_view attribute_set_name)
@@ -921,7 +918,7 @@ Domain from_boundary_element_attribute_set(const mesh_t& mesh, std::string_view 
         std::format("The given attribute name '{}' was not found"
                     " in the boundary element attribute sets of the MFEM mesh.",
                     attribute_set_name));
-    return smith::Domain{mesh, d, smith::Domain::Type::Elements};
+    return smith::Domain{mesh, d - 1, smith::Domain::Type::BoundaryElements};
   }
 }
 
@@ -933,7 +930,7 @@ Domain fromBoundaryElementAttributeSet(const mesh_t& mesh, std::string_view attr
     case 3:
       return from_boundary_element_attribute_set<3>(mesh, attribute_set_name);
     default:
-      SLIC_ERROR("In valid spatial dimension. Domains may only be created on 2D or 3D meshes.");
+      SLIC_ERROR("Invalid spatial dimension. Domains may only be created on 2D or 3D meshes.");
       return smith::Domain{mesh, mesh.Dimension() - 1, smith::Domain::Type::BoundaryElements};
   }
 }
