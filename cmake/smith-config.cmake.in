@@ -50,7 +50,7 @@ if(NOT SMITH_FOUND)
   set(SMITH_USE_SUNDIALS       @SMITH_USE_SUNDIALS@)
   set(SMITH_USE_TRIBOL         @SMITH_USE_TRIBOL@)
   set(SMITH_USE_UMPIRE         @SMITH_USE_UMPIRE@)
-  
+
   set(SMITH_ADIAK_DIR          "@ADIAK_DIR@")
   set(SMITH_ARPACK_DIR         "@ARPACK_DIR@")
   set(SMITH_AXOM_DIR           "@AXOM_DIR@")
@@ -112,7 +112,7 @@ if(NOT SMITH_FOUND)
   endif()
 
   # ARPACK
-  if(SMITH_USE_ARPACK)
+  if(SMITH_USE_ARPACK AND NOT TARGET arpack)
     blt_import_library(NAME       arpack
                        INCLUDES   @ARPACK_INCLUDE_DIRS@
                        LIBRARIES  @ARPACK_LIBRARIES@
@@ -175,7 +175,7 @@ if(NOT SMITH_FOUND)
   endif()
 
   # Axom
-  # also covers cli11, conduit
+  # also covers cli11, conduit, and hdf5
   if(SMITH_USE_AXOM)
     find_dependency(Axom REQUIRED NO_DEFAULT_PATH PATHS "${AXOM_DIR}/lib/cmake")
   endif()
@@ -211,7 +211,7 @@ if(NOT SMITH_FOUND)
 
   # SLEPc requires ARPACK, but MFEM omits it from its exported link interface.
   if(SMITH_USE_ARPACK)
-    foreach(_target mfem axom::mfem tribol::mfem)
+    foreach(_target mfem)
       if(TARGET ${_target})
         target_link_libraries(${_target} INTERFACE arpack)
       endif()
