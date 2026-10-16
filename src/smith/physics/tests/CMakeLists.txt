@@ -35,6 +35,7 @@ set(physics_serial_test_sources
     tet_quality.cpp
     thermomech_statics_patch.cpp
     parameterized_thermomechanics_example.cpp
+    test_tabulated_solid_properties.cpp
     test_kinematic_objective.cpp
     )
 
@@ -59,6 +60,10 @@ endif()
 smith_add_tests(SOURCES       ${physics_serial_test_sources}
                 DEPENDS_ON    ${physics_test_depends}
                 NUM_MPI_TASKS 1)
+
+if (TRIBOL_FOUND AND ENZYME_FOUND AND ENABLE_HIP)
+    set_property(TEST contact_finite_diff APPEND PROPERTY ENVIRONMENT "MPICH_COLL_OPT_OFF=MPI_Alltoallv")
+endif()
 
 if (SMITH_USE_ENZYME)
     # error: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in ...
