@@ -215,6 +215,44 @@ class SuperLUSolver : public mfem::Solver {
   mfem::SuperLUSolver superlu_solver_;
 };
 
+/**
+ * @brief Direct solver using mfem DirectSubBlockSolver that traverse the subsystems associated with each element
+ */
+class DirectElementBlockSolver : public mfem::Solver {
+ public:
+  DirectElementBlockSolver() = default;
+
+  /**
+   * @brief Factor and solve the linear system y = Op^{-1} x using DirectSubBlockSolver
+   *
+   * @param input The input RHS vector
+   * @param output The output solution vector
+   */
+  void Mult(const mfem::Vector& input, mfem::Vector& output) const;
+
+  /**
+   * @brief Set the underlying matrix operator to use in the solution algorithm
+   *
+   * @param op The matrix operator to decompose into element-wise sub-blocks
+   * @pre This operator must be an assembled HypreParMatrix or a BlockOperator
+   * with all blocks either null or HypreParMatrixs for compatibility with
+   * DirectSubBlockSolver
+   */
+  void SetOperator(const mfem::Operator& op);
+
+  /**
+   * @brief Set the element to dof map to extract sub blocks and route back local solutions to global system
+   * 
+   * @param element_dof_map The boolean matrix that indicate ownership of each dof
+   * A(i, j) = 1.0 means dof j belongs to element i
+   */
+  void setElementDofMap(std::unique_ptr<mfem::SparseMatrix> element_dof_map);
+
+ private:
+  std::unique_ptr<mfem::SparseMatrix> element_dof_map_;
+  std::unique_ptr<mfem::DirectSubBlockSolver> direct_solver_;
+};
+
 #ifdef MFEM_USE_STRUMPACK
 /**
  * @brief A wrapper class for using the MFEM Strumpack solver with a HypreParMatrix

@@ -96,6 +96,7 @@ bool linearSolverSupportsBlockOperator(LinearSolver linear_solver)
 #ifdef MFEM_USE_STRUMPACK
     case LinearSolver::Strumpack:
 #endif
+    case LinearSolver::ElementBlock:
 #ifdef SMITH_USE_PETSC
     case LinearSolver::PetscCG:
     case LinearSolver::PetscGMRES:
@@ -1194,6 +1195,54 @@ void StrumpackSolver::SetOperator(const mfem::Operator& op)
 
 #endif
 
+void DirectElementBlockSolver::Mult(const mfem::Vector& input, mfem::Vector& output) const
+{
+  MFEM_VERIFY(direct_solver_, "SetOperator must be called before Mult");
+  direct_solver_->Mult(input, output);
+}
+
+void DirectElementBlockSolver::SetOperator(const mfem::Operator& op)
+{
+  SLIC_ERROR_IF(!element_dof_map_, "Element-to-DOF map must be configured first");
+
+  // Check if this is a block operator
+  auto* block_operator = dynamic_cast<const mfem::BlockOperator*>(&op);
+
+  std::unique_ptr<mfem::HypreParMatrix> monolithic_matrix;
+  const mfem::HypreParMatrix* matrix = nullptr;
+  // If it is, make a monolithic system from the underlying blocks
+  if (block_operator) {
+    monolithic_matrix = buildMonolithicMatrix(*block_operator);
+    matrix = monolithic_matrix.get();
+  } else {
+    // If this is not a block system, check that the input operator is a HypreParMatrix as expected
+    matrix = dynamic_cast<const mfem::HypreParMatrix*>(&op);
+    SLIC_ERROR_ROOT_IF(!matrix, "Matrix must be an assembled HypreParMatrix for use with DirectElementBlockSolver");
+  }
+
+  mfem::SparseMatrix diagonal, off_diagonal;
+  HYPRE_BigInt* column_map = nullptr;
+
+  matrix->GetDiag(diagonal);
+  matrix->GetOffd(off_diagonal, column_map);
+
+  SLIC_ERROR_IF(off_diagonal.NumNonZeroElems() != 0, "Element blocks contain off-rank coupling");
+  SLIC_ERROR_IF(diagonal.Width() != element_dof_map_->Width(), "Element-to-DOF map has incompatible dimensions");
+
+  direct_solver_ = std::make_unique<mfem::DirectSubBlockSolver>(diagonal, *element_dof_map_);
+
+  height = op.Height();
+  width = op.Width();
+}
+
+void DirectElementBlockSolver::setElementDofMap(std::unique_ptr<mfem::SparseMatrix> element_dof_map)
+{
+  SLIC_ERROR_IF(!element_dof_map, "Element-to-DOF map cannot be null");
+  SLIC_ERROR_IF(!element_dof_map->Finalized(), "Element-to-DOF map must be finalized");
+
+  element_dof_map_ = std::move(element_dof_map);
+}
+
 std::unique_ptr<mfem::NewtonSolver> buildNonlinearSolver(NonlinearSolverOptions nonlinear_opts,
                                                          const LinearSolverOptions& linear_opts, mfem::Solver& prec,
                                                          MPI_Comm comm)
@@ -1283,6 +1332,11 @@ std::pair<std::unique_ptr<mfem::Solver>, std::unique_ptr<mfem::Solver>> buildLin
   }
 
 #endif
+
+  if (linear_opts.linear_solver == LinearSolver::ElementBlock) {
+    auto lin_solver = std::make_unique<DirectElementBlockSolver>();
+    return {std::move(lin_solver), std::move(preconditioner)};
+  }
 
   std::unique_ptr<mfem::IterativeSolver> iter_lin_solver;
 

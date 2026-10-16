@@ -103,13 +103,14 @@ struct TimesteppingOptions {
 /// Linear solution method indicator
 enum class LinearSolver
 {
-  CG,         /**< Conjugate gradient */
-  GMRES,      /**< Generalized minimal residual method */
-  SuperLU,    /**< SuperLU MPI-enabled direct nodal solver */
-  Strumpack,  /**< Strumpack MPI-enabled direct frontal solver*/
-  PetscCG,    /**< PETSc MPI-enabled conjugate gradient solver */
-  PetscGMRES, /**< PETSc MPI-enabled generalize minimal residual solver */
-  PrecondOnly /**< Preconditioner application only; no Krylov iterations */
+  CG,           /**< Conjugate gradient */
+  GMRES,        /**< Generalized minimal residual method */
+  SuperLU,      /**< SuperLU MPI-enabled direct nodal solver */
+  Strumpack,    /**< Strumpack MPI-enabled direct frontal solver*/
+  ElementBlock, /**< Direct element block solver */
+  PetscCG,      /**< PETSc MPI-enabled conjugate gradient solver */
+  PetscGMRES,   /**< PETSc MPI-enabled generalize minimal residual solver */
+  PrecondOnly   /**< Preconditioner application only; no Krylov iterations */
 };
 // _linear_solvers_end
 
@@ -125,6 +126,8 @@ inline std::string linearName(const LinearSolver& s)
       return "SuperLU";
     case LinearSolver::Strumpack:
       return "Strumpack";
+    case LinearSolver::ElementBlock:
+      return "ElementBlock";
     case LinearSolver::PetscCG:
       return "PetscCG";
     case LinearSolver::PetscGMRES:
@@ -145,6 +148,7 @@ inline std::map<std::string, LinearSolver> linearSolverMap = {
     {"GMRES", LinearSolver::GMRES},
     {"SuperLU", LinearSolver::SuperLU},
     {"Strumpack", LinearSolver::Strumpack},
+    {"ElementBlock", LinearSolver::ElementBlock},
     {"PetscCG", LinearSolver::PetscCG},
     {"PetscGMRES", LinearSolver::PetscGMRES},
     {"PrecondOnly", LinearSolver::PrecondOnly},

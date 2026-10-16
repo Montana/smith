@@ -43,6 +43,49 @@ double skewMatrixNorm(std::unique_ptr<mfem::HypreParMatrix>& K)
   return Hfronorm;
 }
 
+std::unique_ptr<mfem::SparseMatrix> buildElementDofMap(const std::vector<std::shared_ptr<FiniteElementState>>& unknowns,
+                                                       const mfem::Array<int>& block_offsets)
+{
+  SLIC_ERROR_IF(unknowns.empty(), "buildElementDofMap: received an empty field set");
+  SLIC_ERROR_IF(block_offsets.Size() != static_cast<int>(unknowns.size()) + 1,
+                "buildElementDofMap: Field count does not match block offsets");
+
+  for (const auto& unknown : unknowns) {
+    SLIC_ERROR_IF(!unknown, "buildElementDofMap: Null unknown field encountered");
+    SLIC_ERROR_IF(dynamic_cast<const mfem::L2_FECollection*>(unknown->space().FEColl()) == nullptr,
+                  "buildElementDofMap: Requires element-wise L2 discontinuous fields");
+  }
+
+  const auto* pmesh = unknowns[0]->space().GetParMesh();
+  const int num_elements = unknowns[0]->space().GetNE();
+  const int total_true_dofs = block_offsets.Last();
+
+  auto element_dof_map = std::make_unique<mfem::SparseMatrix>(num_elements, total_true_dofs);
+
+  for (size_t uid = 0; uid < unknowns.size(); ++uid) {
+    const auto& space = unknowns[uid]->space();
+    SLIC_ERROR_IF(space.GetParMesh() != pmesh, "buildElementDofMap: All fields must have the same mesh");
+    SLIC_ERROR_IF(space.GetNE() != num_elements, "buildElementDofMap: All fields must have the same number of elements");
+    SLIC_ERROR_IF(space.TrueVSize() != block_offsets[static_cast<int>(uid + 1)] - block_offsets[static_cast<int>(uid)],
+                  "buildElementDofMap: Field true vector size does not match block offsets");
+
+    for (int e = 0; e < num_elements; ++e) {
+      mfem::Array<int> element_vdofs;
+      space.GetElementVDofs(e, element_vdofs);
+
+      for (int vdof : element_vdofs) {
+        SLIC_ERROR_IF(vdof < 0, "buildElementDofMap: Expect non-negative dof index for element-wise discontinuous fields");
+
+        const int combined_dof = block_offsets[static_cast<int>(uid)] + vdof;
+        element_dof_map->Set(e, combined_dof, 1.0);
+      }
+    }
+  }
+
+  element_dof_map->Finalize();
+  return element_dof_map;
+}
+
 NonlinearBlockSolver::NonlinearBlockSolver(std::unique_ptr<EquationSolver> s, MPI_Comm comm, double abs_tol,
                                            double rel_tol,
                                            std::optional<NonlinearSolverOptions> retained_nonlinear_options,
@@ -73,6 +116,21 @@ std::shared_ptr<NonlinearBlockSolver> NonlinearBlockSolver::cloneFresh() const
 void NonlinearBlockSolver::completeSetup(const std::vector<FieldPtr>& us) const
 {
   if (us.empty() || !nonlinear_solver_) return;
+
+  if (retained_linear_options_ && retained_linear_options_->linear_solver == LinearSolver::ElementBlock) {
+    mfem::Array<int> block_offsets;
+    block_offsets.SetSize(static_cast<int>(us.size()) + 1);
+    block_offsets[0] = 0;
+    for (size_t row_i = 0; row_i < us.size(); ++row_i) {
+      block_offsets[static_cast<int>(row_i) + 1] = us[row_i]->space().TrueVSize();
+    }
+    block_offsets.PartialSum();
+
+    auto* element_block_solver = dynamic_cast<DirectElementBlockSolver*>(&nonlinear_solver_->linearSolver());
+    SLIC_ERROR_IF(!element_block_solver, "NonlinearBlockSolver::completeSetup requires DirectElementBlockSolver");
+    element_block_solver->setElementDofMap(buildElementDofMap(us, block_offsets));
+  }
+
   if (!retained_linear_options_ || retained_linear_options_->preconditioner == Preconditioner::None) return;
 
   // Pick the field with the highest vdim (typically the displacement field for vector problems).

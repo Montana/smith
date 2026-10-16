@@ -109,7 +109,8 @@ TEST(DifferentiablePlasticity, J2SmallStrainLinearHardening)
   state_nonlin_opts.relative_tol = 1e-7;
   state_nonlin_opts.absolute_tol = 1e-8;
   LinearSolverOptions state_lin_opts = lin_opts;
-  state_lin_opts.preconditioner = Preconditioner::HypreJacobi;
+  state_lin_opts.linear_solver = LinearSolver::ElementBlock;
+  state_lin_opts.preconditioner = Preconditioner::None;
   state_lin_opts.relative_tol = 1e-10;
   state_lin_opts.absolute_tol = 1e-10;
 
@@ -290,7 +291,8 @@ TEST(DifferentiablePlasticity, PlasticLoadingFinitDiff)
   state_nonlin_opts.absolute_tol = 1e-8;
   state_nonlin_opts.print_level = 0;
   LinearSolverOptions state_lin_opts = lin_opts;
-  state_lin_opts.preconditioner = Preconditioner::HypreJacobi;
+  state_lin_opts.linear_solver = LinearSolver::ElementBlock;
+  state_lin_opts.preconditioner = Preconditioner::None;
   state_lin_opts.relative_tol = 1e-10;
   state_lin_opts.absolute_tol = 1e-10;
 

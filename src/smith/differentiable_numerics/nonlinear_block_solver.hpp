@@ -174,4 +174,9 @@ std::shared_ptr<NonlinearBlockSolver> buildNonlinearBlockSolver(NonlinearSolverO
                                                                 LinearSolverOptions linear_opts,
                                                                 const smith::Mesh& mesh);
 
+/// @brief Utility to create element-to-dof map for element block solver
+/// @param unknows vector of unknows solved by the element block solver
+/// @param block_offsets block offsets for unknow vector
+std::unique_ptr<mfem::SparseMatrix> buildElementDofMap(const std::vector<std::shared_ptr<FiniteElementState>>& unknowns,
+                                                       const mfem::Array<int>& block_offsets);
 }  // namespace smith
