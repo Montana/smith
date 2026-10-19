@@ -69,7 +69,7 @@ class WeakFormBlockOperatorBuilder {
     if (!op) {
       throw std::invalid_argument("Weak-form operator builder received a null weak-form Jacobian");
     }
-    eliminateEssentialDofs(*op);
+    BoundaryConditionManager::eliminateEssentialDofsFromMatrix(*op, ess_tdofs_);
     return op;
   }
 
@@ -107,15 +107,6 @@ class WeakFormBlockOperatorBuilder {
       block_view.MakeRef(const_cast<mfem::Vector&>(state), block_begin, block_size);
       field = block_view;
     }
-  }
-
-  void eliminateEssentialDofs(mfem::HypreParMatrix& op) const
-  {
-    if (ess_tdofs_.Size() == 0) {
-      return;
-    }
-    mfem::HypreParMatrix* eliminated_entries = op.EliminateRowsCols(ess_tdofs_);
-    delete eliminated_entries;
   }
 
   const WeakForm& weak_form_;
