@@ -43,11 +43,10 @@ This is also useful for a few additional packages:
 
 .. note::
 
-    We provide a basic MacOS Spack environment file that
-    may work for most people. If you want to try using that, skip to :ref:`build_tpls-label`
-    below and use this command line option instead ``--spack-env-file=scripts/spack/configs/macos_sonoma_aarch64/spack.yaml``. You will likely
-    need to update the versions of packages to match the versions installed by Homebrew. The versions for all installed packages can be listed via
-    the command ``brew list --versions``.
+    We provide a MacOS Spack environment file that can be used as a starting point:
+    ``./scripts/spack/configs/macos_tahoe_aarch64/spack.yaml``. However, you should create your own based on your OS,
+    system architecture, and the versions of packages installed on your machine. The versions for all installed packages
+    can be listed via the command ``brew list --versions``.
 
 Homebrew installs LLVM's OpenMP runtime in the separate ``libomp`` package.
 The provided Apple Silicon Spack configuration adds its header and library paths
