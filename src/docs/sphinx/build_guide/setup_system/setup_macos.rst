@@ -50,12 +50,17 @@ This is also useful for a few additional packages:
 
 Homebrew installs LLVM's OpenMP runtime in the separate ``libomp`` package.
 The provided Apple Silicon Spack configuration adds its header and library paths
-to the external LLVM compiler's ``extra_attributes.environment.prepend_path``
-entries for ``CPATH`` and ``LIBRARY_PATH``. These paths are needed during CMake's
-verbose OpenMP detection and PETSc's configuration, including probes that bypass
-Spack's normal compiler flag injection. The compiler's ``cflags``, ``cxxflags``,
-and ``ldflags`` entries also include these paths and a runtime library search path
-so generated CMake host-configs work outside the Spack build environment.
+to the external LLVM compiler:
+
+.. literalinclude:: ../../../../../scripts/spack/configs/macos_tahoe_aarch64/spack.yaml
+   :language: yaml
+   :lines: 46-57
+
+These paths are needed during CMake's verbose OpenMP detection and PETSc's
+configuration, including probes that bypass Spack's normal compiler flag
+injection. The compiler's ``cflags``, ``cxxflags``, and ``ldflags`` entries also
+include these paths and a runtime library search path so generated CMake
+host-configs work outside the Spack build environment.
 
 For Intel Macs or a custom Homebrew prefix, update all ``libomp`` paths in your
 Spack configuration using the directory printed by ``brew --prefix libomp``.
