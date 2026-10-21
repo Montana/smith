@@ -54,7 +54,8 @@ to the external LLVM compiler:
 
 .. literalinclude:: ../../../../../scripts/spack/configs/macos_tahoe_aarch64/spack.yaml
    :language: yaml
-   :lines: 46-57
+   :start-after: _macos_openmp_start
+   :end-before: _macos_openmp_end
 
 These paths are needed during CMake's verbose OpenMP detection and PETSc's
 configuration, including probes that bypass Spack's normal compiler flag
